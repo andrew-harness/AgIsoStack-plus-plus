@@ -2844,7 +2844,7 @@ namespace isobus
 			{
 				ws->join_parsing_thread();
 				///  @todo Get the parent object ID of the faulting object
-				send_end_of_object_pool_response(true, NULL_OBJECT_ID, ws->get_object_pool_faulting_object_id(), 0, ws->get_control_function());
+				send_end_of_object_pool_response(false, NULL_OBJECT_ID, ws->get_object_pool_faulting_object_id(), 0, ws->get_control_function());
 			}
 		}
 	}
