@@ -2906,18 +2906,49 @@ namespace isobus
 			else if (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Fail == ws->get_object_pool_processing_state())
 			{
 				ws->join_parsing_thread();
+
+				// A parse failure on an already-active working set is a failed runtime object pool
+				// update (ISO 11783-6 clause C.2.6): the VT deletes the entire object pool from
+				// volatile memory -- including the pool as it existed prior to the update -- and
+				// suspends the working set. A parse failure on a working set that never became active
+				// is an initial-upload failure, which is left in place so the client can retry (only
+				// the error response is sent). get_bit(3) of the Object Pool Error Codes byte is the
+				// "object pool was deleted from volatile memory" flag, set only for the C.2.6 case.
+				// A runtime update reuses the same managed working set object that was stored in
+				// activeWorkingSet at activation, so a pointer comparison identifies it exactly; an
+				// address comparison would false-match a never-active working set whose control
+				// function reports the null address while no working set is active.
+				const bool poolWasActive = (ws == activeWorkingSet);
+
 				///  @todo Get the parent object ID of the faulting object
-				send_end_of_object_pool_response(false, NULL_OBJECT_ID, ws->get_object_pool_faulting_object_id(), 0, ws->get_control_function());
+				send_end_of_object_pool_response(false, NULL_OBJECT_ID, ws->get_object_pool_faulting_object_id(), poolWasActive ? get_bit(3) : 0, ws->get_control_function());
+
+				if (poolWasActive)
+				{
+					// Flag the working set for teardown by the pass below, which runs in this same
+					// update() call, so the invalid pool is deleted and the working set suspended
+					// immediately rather than left active with a half-merged pool.
+					ws->request_deletion();
+				}
 			}
 		}
 
-		// ISO 11783-6 clause 4.6.9: a connected working set sends a Working Set Maintenance message
-		// about once per second. If those messages stop arriving, after a 3 s timeout the VT shall
-		// consider the working set lost and tear it down: delete its object pool, drop it as the
-		// active working set, alert the operator, and require the client to re-initialise. This is a
-		// separate pass from the parse-completion loop above so that erasing a timed-out working set
-		// cannot invalidate that loop's iterator. A maintenance timestamp of 0 means no maintenance
-		// message has been received yet (e.g. a pool still uploading), which must not be timed out.
+		// Tear down a working set on either of two triggers. Both delete its object pool, drop it as
+		// the active working set, alert the operator, and require the client to re-initialise:
+		//   1. ISO 11783-6 clause 4.6.9, unexpected loss of a working set: a connected working set
+		//      sends a Working Set Maintenance message about once per second, and if those stop
+		//      arriving the VT shall consider it lost after a 3 s timeout. A maintenance timestamp of 0
+		//      means no maintenance message has been received yet (e.g. a pool still uploading), which
+		//      must not be timed out.
+		//   2. ISO 11783-6 clause C.2.6, invalid runtime object pool update: the parse-completion loop
+		//      above flagged an already-active working set whose runtime pool update failed to parse
+		//      (request_deletion()), and here the entire pool -- including the pre-update version -- is
+		//      deleted and the working set suspended. request_deletion() is set in the Fail branch of
+		//      that loop and consumed here within the same update() call, so this teardown is immediate.
+		// This is a separate pass from the parse-completion loop above so that erasing a working set
+		// cannot invalidate that loop's iterator. The operator-facing alert UI is deferred with the SDL
+		// window (like the acoustic alarm in clause 4.4 b), so each reason is logged here and raised on
+		// the backend once that exists; no audio/UI dependency is added.
 		// Out of scope here: NACK-until-reinitialise (re-initialisation happens naturally once the
 		// working set is gone) and auxiliary-assignment removal (AUX-N is unimplemented).
 		for (auto workingSetIterator = managedWorkingSetList.begin(); managedWorkingSetList.end() != workingSetIterator;)
@@ -2925,8 +2956,11 @@ namespace isobus
 			const auto &ws = *workingSetIterator;
 			const std::uint32_t maintenanceTimestamp = ws->get_working_set_maintenance_message_timestamp_ms();
 
-			if ((0 != maintenanceTimestamp) &&
-			    (isobus::SystemTiming::time_expired_ms(maintenanceTimestamp, 3000)))
+			const bool maintenanceTimedOut = (0 != maintenanceTimestamp) &&
+			  (isobus::SystemTiming::time_expired_ms(maintenanceTimestamp, 3000));
+			const bool poolInvalidated = ws->is_deletion_requested();
+
+			if (maintenanceTimedOut || poolInvalidated)
 			{
 				const bool workingSetHasControlFunction = (nullptr != ws->get_control_function());
 				std::uint8_t lostAddress = isobus::NULL_CAN_ADDRESS;
@@ -2935,10 +2969,16 @@ namespace isobus
 					lostAddress = ws->get_control_function()->get_address();
 				}
 
-				// Operator-alert requirement of 4.6.9. The operator-facing alert UI is deferred with
-				// the SDL window (like the acoustic alarm in clause 4.4 b), so it is logged here and
-				// raised on the backend once that exists; no audio/UI dependency is added.
-				LOG_ERROR("[VT Server]: Working set at address %u lost - no Working Set Maintenance message for over 3 s. Deleting its object pool per ISO 11783-6 4.6.9.", lostAddress);
+				// A working set could satisfy both triggers; the C.2.6 invalid-update message takes
+				// precedence over the 4.6.9 timeout message.
+				if (poolInvalidated)
+				{
+					LOG_ERROR("[VT Server]: Working set at address %u had an invalid object pool update - deleting the entire pool from volatile memory and suspending the working set per ISO 11783-6 C.2.6.", lostAddress);
+				}
+				else
+				{
+					LOG_ERROR("[VT Server]: Working set at address %u lost - no Working Set Maintenance message for over 3 s. Deleting its object pool per ISO 11783-6 4.6.9.", lostAddress);
+				}
 
 				if ((ws == activeWorkingSet) ||
 				    (workingSetHasControlFunction && (lostAddress == activeWorkingSetMasterAddress)))
