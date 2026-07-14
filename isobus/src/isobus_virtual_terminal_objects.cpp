@@ -960,6 +960,235 @@ namespace isobus
 		hidden = value;
 	}
 
+	VirtualTerminalObjectType Animation::get_object_type() const
+	{
+		return VirtualTerminalObjectType::Animation;
+	}
+
+	std::uint32_t Animation::get_minumum_object_length() const
+	{
+		return MIN_OBJECT_LENGTH;
+	}
+
+	bool Animation::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool) const
+	{
+		bool anyWrongChildType = false;
+
+		for (auto &child : children)
+		{
+			auto childObject = get_object_by_id(child.id, objectPool);
+			if (nullptr != childObject)
+			{
+				switch (childObject->get_object_type())
+				{
+					case VirtualTerminalObjectType::WorkingSet:
+					case VirtualTerminalObjectType::Container:
+					case VirtualTerminalObjectType::Button:
+					case VirtualTerminalObjectType::InputBoolean:
+					case VirtualTerminalObjectType::InputString:
+					case VirtualTerminalObjectType::InputNumber:
+					case VirtualTerminalObjectType::InputList:
+					case VirtualTerminalObjectType::OutputString:
+					case VirtualTerminalObjectType::OutputNumber:
+					case VirtualTerminalObjectType::OutputList:
+					case VirtualTerminalObjectType::OutputLine:
+					case VirtualTerminalObjectType::OutputRectangle:
+					case VirtualTerminalObjectType::OutputEllipse:
+					case VirtualTerminalObjectType::OutputPolygon:
+					case VirtualTerminalObjectType::OutputMeter:
+					case VirtualTerminalObjectType::GraphicsContext:
+					case VirtualTerminalObjectType::OutputArchedBarGraph:
+					case VirtualTerminalObjectType::OutputLinearBarGraph:
+					case VirtualTerminalObjectType::Animation:
+					case VirtualTerminalObjectType::PictureGraphic:
+					case VirtualTerminalObjectType::ObjectPointer:
+					case VirtualTerminalObjectType::ExternalObjectPointer:
+					case VirtualTerminalObjectType::AuxiliaryFunctionType2:
+					case VirtualTerminalObjectType::AuxiliaryInputType2:
+					case VirtualTerminalObjectType::AuxiliaryControlDesignatorType2:
+					case VirtualTerminalObjectType::Macro:
+					{
+						// Valid Child Object
+					}
+					break;
+
+					default:
+					{
+						anyWrongChildType = true;
+					}
+					break;
+				}
+			}
+		}
+		return ((!anyWrongChildType) &&
+		        (NULL_OBJECT_ID != objectID));
+	}
+
+	bool Animation::set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &returnedError)
+	{
+		// All attributes are read only
+		returnedError = AttributeError::InvalidAttributeID;
+		return false;
+	}
+
+	bool Animation::get_attribute(std::uint8_t attributeID, std::uint32_t &returnedAttributeData) const
+	{
+		bool retVal = false;
+
+		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
+		{
+			switch (attributeID)
+			{
+				case static_cast<std::uint8_t>(AttributeName::Type):
+				{
+					returnedAttributeData = static_cast<std::uint8_t>(get_object_type());
+					retVal = true;
+				}
+				break;
+
+				case static_cast<std::uint8_t>(AttributeName::Width):
+				{
+					returnedAttributeData = get_width();
+					retVal = true;
+				}
+				break;
+
+				case static_cast<std::uint8_t>(AttributeName::Height):
+				{
+					returnedAttributeData = get_height();
+					retVal = true;
+				}
+				break;
+
+				case static_cast<std::uint8_t>(AttributeName::RefreshInterval):
+				{
+					returnedAttributeData = get_refresh_interval();
+					retVal = true;
+				}
+				break;
+
+				case static_cast<std::uint8_t>(AttributeName::Value):
+				{
+					returnedAttributeData = get_value();
+					retVal = true;
+				}
+				break;
+
+				case static_cast<std::uint8_t>(AttributeName::Enabled):
+				{
+					returnedAttributeData = get_enabled();
+					retVal = true;
+				}
+				break;
+
+				case static_cast<std::uint8_t>(AttributeName::FirstChildIndex):
+				{
+					returnedAttributeData = get_first_child_index();
+					retVal = true;
+				}
+				break;
+
+				case static_cast<std::uint8_t>(AttributeName::LastChildIndex):
+				{
+					returnedAttributeData = get_last_child_index();
+					retVal = true;
+				}
+				break;
+
+				case static_cast<std::uint8_t>(AttributeName::DefaultChildIndex):
+				{
+					returnedAttributeData = get_default_child_index();
+					retVal = true;
+				}
+				break;
+
+				case static_cast<std::uint8_t>(AttributeName::Options):
+				{
+					returnedAttributeData = get_options();
+					retVal = true;
+				}
+				break;
+
+				default:
+				{
+					// Do nothing, return false
+				}
+				break;
+			}
+		}
+		return retVal;
+	}
+
+	std::uint16_t Animation::get_refresh_interval() const
+	{
+		return refreshInterval;
+	}
+
+	void Animation::set_refresh_interval(std::uint16_t value)
+	{
+		refreshInterval = value;
+	}
+
+	std::uint8_t Animation::get_value() const
+	{
+		return value;
+	}
+
+	void Animation::set_value(std::uint8_t inputValue)
+	{
+		value = inputValue;
+	}
+
+	bool Animation::get_enabled() const
+	{
+		return enabled;
+	}
+
+	void Animation::set_enabled(bool value)
+	{
+		enabled = value;
+	}
+
+	std::uint8_t Animation::get_first_child_index() const
+	{
+		return firstChildIndex;
+	}
+
+	void Animation::set_first_child_index(std::uint8_t value)
+	{
+		firstChildIndex = value;
+	}
+
+	std::uint8_t Animation::get_last_child_index() const
+	{
+		return lastChildIndex;
+	}
+
+	void Animation::set_last_child_index(std::uint8_t value)
+	{
+		lastChildIndex = value;
+	}
+
+	std::uint8_t Animation::get_default_child_index() const
+	{
+		return defaultChildIndex;
+	}
+
+	void Animation::set_default_child_index(std::uint8_t value)
+	{
+		defaultChildIndex = value;
+	}
+
+	std::uint8_t Animation::get_options() const
+	{
+		return optionsBitfield;
+	}
+
+	void Animation::set_options(std::uint8_t value)
+	{
+		optionsBitfield = value;
+	}
+
 	VirtualTerminalObjectType SoftKeyMask::get_object_type() const
 	{
 		return VirtualTerminalObjectType::SoftKeyMask;

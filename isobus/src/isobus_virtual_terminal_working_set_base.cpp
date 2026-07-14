@@ -1399,9 +1399,64 @@ namespace isobus
 				break;
 
 				case VirtualTerminalObjectType::GraphicsContext:
-				case VirtualTerminalObjectType::Animation:
 				{
 					retVal = parse_unsupported_object(decodedType, decodedID, iopData, iopLength);
+				}
+				break;
+
+				case VirtualTerminalObjectType::Animation:
+				{
+					auto tempObject = std::make_shared<Animation>();
+
+					if (iopLength >= tempObject->get_minumum_object_length())
+					{
+						tempObject->set_id(decodedID);
+						tempObject->set_width(get_little_endian_uint16(iopData, 3));
+						tempObject->set_height(get_little_endian_uint16(iopData, 5));
+						tempObject->set_refresh_interval(get_little_endian_uint16(iopData, 7));
+						tempObject->set_value(iopData[9]);
+						tempObject->set_enabled(0 != iopData[10]);
+						tempObject->set_first_child_index(iopData[11]);
+						tempObject->set_last_child_index(iopData[12]);
+						tempObject->set_default_child_index(iopData[13]);
+						tempObject->set_options(iopData[14]);
+
+						// Now add child objects (Table B.72: object references before macro references)
+						const std::uint8_t childrenToFollow = iopData[15];
+						const auto sizeOfChildren = static_cast<std::uint16_t>(childrenToFollow * 6); // ID, X, Y 2 bytes each
+						const std::uint8_t numberOfMacrosToFollow = iopData[16];
+						iopLength -= 17; // Subtract the bytes we've processed so far.
+						iopData += 17; // Move the pointer
+
+						if (iopLength >= sizeOfChildren)
+						{
+							for (std::uint_fast8_t i = 0; i < childrenToFollow; i++)
+							{
+								auto childID = get_little_endian_uint16(iopData, 0);
+								auto childX = get_little_endian_int16(iopData, 2);
+								auto childY = get_little_endian_int16(iopData, 4);
+								tempObject->add_child(childID, childX, childY);
+								iopLength -= 6;
+								iopData += 6;
+							}
+
+							// Next, parse macro list
+							retVal = parse_object_macro_reference(tempObject, numberOfMacrosToFollow, iopData, iopLength);
+						}
+						else
+						{
+							LOG_ERROR("[WS]: Not enough IOP data to parse animation children for object " + isobus::to_string(static_cast<int>(decodedID)));
+						}
+					}
+					else
+					{
+						LOG_ERROR("[WS]: Not enough IOP data to parse animation object");
+					}
+
+					if (retVal)
+					{
+						retVal = add_or_replace_object(tempObject);
+					}
 				}
 				break;
 
@@ -2534,21 +2589,6 @@ namespace isobus
 			{
 				// Table B.70: fixed 9-byte record (see ExternalObjectPointer::get_minumum_object_length).
 				objectLength = 9;
-			}
-			break;
-
-			case VirtualTerminalObjectType::Animation:
-			{
-				// Table B.72: 17-byte header, then object references (6 bytes each) and macro
-				// references (2 bytes each). Counts are at record bytes 16 and 17.
-				if (iopLength < 17)
-				{
-					LOG_ERROR("[WS]: Not enough IOP data to parse animation object " + isobus::to_string(static_cast<int>(decodedID)));
-					return false;
-				}
-				objectLength = 17u +
-				  (static_cast<std::uint32_t>(iopData[15]) * 6u) +
-				  (static_cast<std::uint32_t>(iopData[16]) * 2u);
 			}
 			break;
 
