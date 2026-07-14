@@ -697,16 +697,16 @@ namespace isobus
 						tempObject->set_name_object_id(get_little_endian_uint16(iopData, 4)); // Output string for the object's name/label
 						tempObject->set_key_group_icon(get_little_endian_uint16(iopData, 6));
 
-						// Parse children
+						// The object count and the macro count are adjacent, and both precede the
+						// child list, so the macro count must be read before the children are parsed.
 						const std::uint8_t numberChildrenToFollow = iopData[8];
-						iopLength -= 9;
-						iopData += 9;
+						const std::uint8_t numberOfMacrosToFollow = iopData[9];
+						iopLength -= 10;
+						iopData += 10;
 
-						const std::int64_t iopLengthRemaining = iopLength - numberChildrenToFollow * 2;
-
-						if (iopLength >= iopLengthRemaining)
+						if (numberChildrenToFollow <= KeyGroup::MAX_CHILD_KEYS)
 						{
-							if (numberChildrenToFollow <= KeyGroup::MAX_CHILD_KEYS)
+							if (iopLength >= static_cast<std::uint32_t>(2 * numberChildrenToFollow))
 							{
 								for (std::uint_fast8_t i = 0; i < numberChildrenToFollow; i++)
 								{
@@ -715,21 +715,16 @@ namespace isobus
 									iopData += 2;
 								}
 
-								// Now parse macros
-								const std::uint8_t numberOfMacrosToFollow = iopData[0];
-								iopData++;
-								iopLength--;
-
 								retVal = parse_object_macro_reference(tempObject, numberOfMacrosToFollow, iopData, iopLength);
 							}
 							else
 							{
-								LOG_ERROR("[WS]: Key group " + isobus::to_string(static_cast<int>(decodedID)) + " has too many child key objects! Only 4 are permitted.");
+								LOG_ERROR("[WS]: Not enough IOP data to parse key group object children");
 							}
 						}
 						else
 						{
-							LOG_ERROR("[WS]: Not enough IOP data to parse key group object children");
+							LOG_ERROR("[WS]: Key group " + isobus::to_string(static_cast<int>(decodedID)) + " has too many child key objects! Only 4 are permitted.");
 						}
 					}
 					else
@@ -2513,6 +2508,11 @@ namespace isobus
 				}
 				iopLength -= 4;
 				iopData += 4;
+
+				// An extended reference occupies two 2-byte groupings, and the object's
+				// "number of macros to follow" counts groupings rather than macros (4.6.22.3),
+				// so this reference accounts for two of them.
+				i++;
 			}
 			else
 			{
