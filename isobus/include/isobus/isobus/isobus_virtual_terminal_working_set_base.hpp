@@ -104,6 +104,24 @@ namespace isobus
 		                                  std::uint8_t *&iopData,
 		                                  std::uint32_t &iopLength) const;
 
+		/// @brief Consumes an object the VT parses for compatibility but does not functionally
+		/// support, so the byte stream stays synchronized and the object pool is not rejected.
+		/// @details ISO 11783-6 clause A.1.1 requires the VT to parse every object type even
+		/// when it is not functionally supported; non-support is a rendering opt-out, never a
+		/// parse failure. The object's serialized length is computed from its record layout
+		/// (Annex B) and the pointer is advanced past it. The object is not added to the tree.
+		/// Applies only to standard object types with a defined layout; a genuinely unknown
+		/// type has no computable length and is still rejected.
+		/// @param[in] type The object type being skipped
+		/// @param[in] decodedID The object ID, for logging
+		/// @param[in,out] iopData Pointer to the start of the object's record; advanced past it on success
+		/// @param[in,out] iopLength Remaining IOP length; decremented by the object's length on success
+		/// @returns True if the object was consumed, false if the data was too short to hold it
+		bool parse_unsupported_object(VirtualTerminalObjectType type,
+		                              std::uint16_t decodedID,
+		                              std::uint8_t *&iopData,
+		                              std::uint32_t &iopLength) const;
+
 		std::mutex managedWorkingSetMutex; ///< A mutex to protect the interface of the managed working set
 		VTColourTable workingSetColourTable; ///< This working set's colour table
 		std::uint32_t iopSize = 0; ///< Total size of the IOP in bytes

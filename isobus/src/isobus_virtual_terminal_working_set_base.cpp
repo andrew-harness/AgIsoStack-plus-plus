@@ -1394,14 +1394,9 @@ namespace isobus
 				break;
 
 				case VirtualTerminalObjectType::GraphicsContext:
-				{
-					LOG_ERROR("[WS]: Graphics context not supported yet (todo)");
-				}
-				break;
-
 				case VirtualTerminalObjectType::Animation:
 				{
-					LOG_ERROR("[WS]: Animation not supported yet (todo)");
+					retVal = parse_unsupported_object(decodedType, decodedID, iopData, iopLength);
 				}
 				break;
 
@@ -1840,35 +1835,7 @@ namespace isobus
 
 				case VirtualTerminalObjectType::ExtendedInputAttributes:
 				{
-					auto tempObject = std::make_shared<ExtendedInputAttributes>();
-
-					if (iopLength >= tempObject->get_minumum_object_length())
-					{
-						tempObject->set_id(decodedID);
-
-						if (iopData[3] <= static_cast<std::uint8_t>(ExtendedInputAttributes::ValidationType::InvalidCharactersAreListed))
-						{
-							tempObject->set_validation_type(static_cast<ExtendedInputAttributes::ValidationType>(get_masked_value(iopData[3], 0x01U)));
-						}
-						else
-						{
-							tempObject->set_validation_type(static_cast<ExtendedInputAttributes::ValidationType>(get_masked_value(iopData[3], 0x01U)));
-							LOG_WARNING("[WS]: Invalid extended input attributes validation type. Validation type must be < 2");
-						}
-
-						const std::uint8_t numberOfCodePlanesToFollow = iopData[4];
-						tempObject->set_number_of_code_planes(numberOfCodePlanesToFollow);
-						LOG_ERROR("[WS]: Extended input attributes not supported yet (todo)");
-					}
-					else
-					{
-						LOG_ERROR("[WS]: Not enough IOP data to parse extended input attributes object");
-					}
-
-					if (retVal)
-					{
-						retVal = add_or_replace_object(tempObject);
-					}
+					retVal = parse_unsupported_object(decodedType, decodedID, iopData, iopLength);
 				}
 				break;
 
@@ -1915,7 +1882,7 @@ namespace isobus
 
 				case VirtualTerminalObjectType::ObjectLabelRefrenceList:
 				{
-					LOG_ERROR("[WS]: Object label reference not supported yet (todo)");
+					retVal = parse_unsupported_object(decodedType, decodedID, iopData, iopLength);
 				}
 				break;
 
@@ -1944,20 +1911,10 @@ namespace isobus
 				break;
 
 				case VirtualTerminalObjectType::ExternalObjectDefinition:
-				{
-					LOG_ERROR("[WS]: External object definition not supported yet (todo)");
-				}
-				break;
-
 				case VirtualTerminalObjectType::ExternalReferenceNAME:
-				{
-					LOG_ERROR("[WS]: External reference name not supported yet (todo)");
-				}
-				break;
-
 				case VirtualTerminalObjectType::ExternalObjectPointer:
 				{
-					LOG_ERROR("[WS]: External object pointer not supported yet (todo)");
+					retVal = parse_unsupported_object(decodedType, decodedID, iopData, iopLength);
 				}
 				break;
 
@@ -2539,6 +2496,126 @@ namespace isobus
 				iopData += 2;
 			}
 		}
+		return true;
+	}
+
+	bool VirtualTerminalWorkingSetBase::parse_unsupported_object(VirtualTerminalObjectType type,
+	                                                             std::uint16_t decodedID,
+	                                                             std::uint8_t *&iopData,
+	                                                             std::uint32_t &iopLength) const
+	{
+		// Serialized length of the object's record (Annex B). Variable-length records read their
+		// count fields first, and every read is bounds-checked so a truncated or hostile pool
+		// cannot drive a read past the end of the buffer.
+		std::uint32_t objectLength = 0;
+
+		switch (type)
+		{
+			case VirtualTerminalObjectType::GraphicsContext:
+			{
+				// Table B.59: fixed 34-byte record, no children and no macro list.
+				objectLength = 34;
+			}
+			break;
+
+			case VirtualTerminalObjectType::ExternalReferenceNAME:
+			{
+				// Table B.68: object id, type, options, and two 4-byte NAME halves.
+				objectLength = 12;
+			}
+			break;
+
+			case VirtualTerminalObjectType::ExternalObjectPointer:
+			{
+				// Table B.70: fixed 9-byte record (see ExternalObjectPointer::get_minumum_object_length).
+				objectLength = 9;
+			}
+			break;
+
+			case VirtualTerminalObjectType::Animation:
+			{
+				// Table B.72: 17-byte header, then object references (6 bytes each) and macro
+				// references (2 bytes each). Counts are at record bytes 16 and 17.
+				if (iopLength < 17)
+				{
+					LOG_ERROR("[WS]: Not enough IOP data to parse animation object " + isobus::to_string(static_cast<int>(decodedID)));
+					return false;
+				}
+				objectLength = 17u +
+				  (static_cast<std::uint32_t>(iopData[15]) * 6u) +
+				  (static_cast<std::uint32_t>(iopData[16]) * 2u);
+			}
+			break;
+
+			case VirtualTerminalObjectType::ObjectLabelRefrenceList:
+			{
+				// Table B.64: 5-byte header then a 2-byte count of labeled objects, each of
+				// which consumes 7 bytes.
+				if (iopLength < 5)
+				{
+					LOG_ERROR("[WS]: Not enough IOP data to parse object label reference list " + isobus::to_string(static_cast<int>(decodedID)));
+					return false;
+				}
+				objectLength = 5u + (static_cast<std::uint32_t>(get_little_endian_uint16(iopData, 3)) * 7u);
+			}
+			break;
+
+			case VirtualTerminalObjectType::ExternalObjectDefinition:
+			{
+				// Table B.66: 13-byte header then a count of object IDs, 2 bytes each.
+				if (iopLength < 13)
+				{
+					LOG_ERROR("[WS]: Not enough IOP data to parse external object definition " + isobus::to_string(static_cast<int>(decodedID)));
+					return false;
+				}
+				objectLength = 13u + (static_cast<std::uint32_t>(iopData[12]) * 2u);
+			}
+			break;
+
+			case VirtualTerminalObjectType::ExtendedInputAttributes:
+			{
+				// Table B.53: 5-byte header, then for each code plane a 2-byte header (plane
+				// number and range count) followed by that many 4-byte ranges. The plane list
+				// is walked here so the total length can be computed.
+				if (iopLength < 5)
+				{
+					LOG_ERROR("[WS]: Not enough IOP data to parse extended input attributes " + isobus::to_string(static_cast<int>(decodedID)));
+					return false;
+				}
+				const std::uint32_t numberOfCodePlanes = iopData[4];
+				std::uint32_t offset = 5u;
+				for (std::uint32_t plane = 0u; plane < numberOfCodePlanes; plane++)
+				{
+					if (iopLength < (offset + 2u))
+					{
+						LOG_ERROR("[WS]: Not enough IOP data to parse extended input attributes code planes for object " + isobus::to_string(static_cast<int>(decodedID)));
+						return false;
+					}
+					const std::uint32_t numberOfRanges = iopData[offset + 1u];
+					offset += 2u + (numberOfRanges * 4u);
+				}
+				objectLength = offset;
+			}
+			break;
+
+			default:
+			{
+				// A type with no defined layout has no computable length, so the stream cannot
+				// be resynchronized past it. Rejecting the pool is the only safe option and is
+				// permitted for unknown/proprietary objects (clause D.15).
+				LOG_ERROR("[WS]: Unsupported Object (Type: %d)", static_cast<int>(type));
+				return false;
+			}
+		}
+
+		if (iopLength < objectLength)
+		{
+			LOG_ERROR("[WS]: Not enough IOP data to parse unsupported object " + isobus::to_string(static_cast<int>(decodedID)));
+			return false;
+		}
+
+		iopData += objectLength;
+		iopLength -= objectLength;
 		return true;
 	}
 } // namespace isobus
