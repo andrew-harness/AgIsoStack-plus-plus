@@ -136,6 +136,7 @@ namespace isobus
 		std::uint32_t transferredIopSize = 0; ///< Total number of IOP bytes transferred
 		std::map<std::uint16_t, std::shared_ptr<VTObject>> vtObjectTree; ///< The C++ object representation (deserialized) of the object pool being managed
 		std::vector<std::vector<std::uint8_t>> iopFilesRawData; ///< Raw IOP File data from the client
+		std::size_t parsedIopFileCount = 0; ///< Count of iopFilesRawData chunks already parsed into the tree. A runtime object pool update (C.2.6) parses only the newer chunks so live objects -- and any runtime state on them -- are merged with, not rebuilt from, the authored bytes.
 		std::uint16_t workingSetID = NULL_OBJECT_ID; ///< Stores the object ID of the working set object itself
 		std::uint16_t faultingObjectID = NULL_OBJECT_ID; ///< Stores the faulting object ID to send to a client when parsing the pool fails
 	};

@@ -218,8 +218,15 @@ namespace isobus
 			set_object_pool_processing_state(ObjectPoolProcessingThreadState::Running);
 			LOG_INFO("[WS]: Beginning parsing of object pool. This pool has " +
 			         isobus::to_string(static_cast<int>(iopFilesRawData.size())) +
-			         " IOP components.");
-			for (std::size_t i = 0; i < iopFilesRawData.size(); i++)
+			         " IOP components, " +
+			         isobus::to_string(static_cast<int>(iopFilesRawData.size() - parsedIopFileCount)) +
+			         " new this pass.");
+			// Parse only the chunks at or after parsedIopFileCount. A runtime object pool update
+			// (C.2.6) transfers only the added/replacement objects; add_or_replace_object merges
+			// them into the existing tree (a re-sent ID overwrites, a new ID is added), so already
+			// parsed objects -- and any runtime state on them -- survive rather than being rebuilt
+			// from their authored bytes.
+			for (std::size_t i = parsedIopFileCount; i < iopFilesRawData.size(); i++)
 			{
 				if (!parse_iop_into_objects(iopFilesRawData[i].data(), static_cast<std::uint32_t>(iopFilesRawData[i].size())))
 				{
@@ -230,6 +237,7 @@ namespace isobus
 
 			if (lSuccess)
 			{
+				parsedIopFileCount = iopFilesRawData.size();
 				LOG_INFO("[WS]: Object pool successfully parsed.");
 				set_object_pool_processing_state(ObjectPoolProcessingThreadState::Success);
 			}
