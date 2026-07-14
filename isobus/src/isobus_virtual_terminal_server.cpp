@@ -2847,5 +2847,57 @@ namespace isobus
 				send_end_of_object_pool_response(false, NULL_OBJECT_ID, ws->get_object_pool_faulting_object_id(), 0, ws->get_control_function());
 			}
 		}
+
+		// ISO 11783-6 clause 4.6.9: a connected working set sends a Working Set Maintenance message
+		// about once per second. If those messages stop arriving, after a 3 s timeout the VT shall
+		// consider the working set lost and tear it down: delete its object pool, drop it as the
+		// active working set, alert the operator, and require the client to re-initialise. This is a
+		// separate pass from the parse-completion loop above so that erasing a timed-out working set
+		// cannot invalidate that loop's iterator. A maintenance timestamp of 0 means no maintenance
+		// message has been received yet (e.g. a pool still uploading), which must not be timed out.
+		// Out of scope here: NACK-until-reinitialise (re-initialisation happens naturally once the
+		// working set is gone) and auxiliary-assignment removal (AUX-N is unimplemented).
+		for (auto workingSetIterator = managedWorkingSetList.begin(); managedWorkingSetList.end() != workingSetIterator;)
+		{
+			const auto &ws = *workingSetIterator;
+			const std::uint32_t maintenanceTimestamp = ws->get_working_set_maintenance_message_timestamp_ms();
+
+			if ((0 != maintenanceTimestamp) &&
+			    (isobus::SystemTiming::time_expired_ms(maintenanceTimestamp, 3000)))
+			{
+				const bool workingSetHasControlFunction = (nullptr != ws->get_control_function());
+				std::uint8_t lostAddress = isobus::NULL_CAN_ADDRESS;
+				if (workingSetHasControlFunction)
+				{
+					lostAddress = ws->get_control_function()->get_address();
+				}
+
+				// Operator-alert requirement of 4.6.9. The operator-facing alert UI is deferred with
+				// the SDL window (like the acoustic alarm in clause 4.4 b), so it is logged here and
+				// raised on the backend once that exists; no audio/UI dependency is added.
+				LOG_ERROR("[VT Server]: Working set at address %u lost - no Working Set Maintenance message for over 3 s. Deleting its object pool per ISO 11783-6 4.6.9.", lostAddress);
+
+				if ((ws == activeWorkingSet) ||
+				    (workingSetHasControlFunction && (lostAddress == activeWorkingSetMasterAddress)))
+				{
+					activeWorkingSet = nullptr;
+					activeWorkingSetMasterAddress = isobus::NULL_CAN_ADDRESS;
+					activeWorkingSetDataMaskObjectID = NULL_OBJECT_ID;
+					activeWorkingSetSoftkeyMaskObjectID = NULL_OBJECT_ID;
+				}
+
+				if ((workingSetHasControlFunction) &&
+				    (!delete_object_pool(ws->get_control_function()->get_NAME())))
+				{
+					LOG_WARNING("[VT Server]: Failed to delete the object pool for the lost working set at address %u.", lostAddress);
+				}
+
+				workingSetIterator = managedWorkingSetList.erase(workingSetIterator);
+			}
+			else
+			{
+				++workingSetIterator;
+			}
+		}
 	}
 }
