@@ -2819,7 +2819,19 @@ namespace isobus
 			if (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Success == ws->get_object_pool_processing_state())
 			{
 				ws->join_parsing_thread();
-				send_end_of_object_pool_response(true, NULL_OBJECT_ID, NULL_OBJECT_ID, 0, ws->get_control_function());
+				if (ws->get_was_object_pool_loaded_from_non_volatile_memory())
+				{
+					// A pool loaded via Load Version is completed by a Load Version response, not an
+					// End of Object Pool response -- that is the message the client waits on. Consume
+					// the flag so a later parse on this working set (e.g. a runtime pool update) is
+					// again completed by an End of Object Pool response.
+					send_load_version_response(0, ws->get_control_function());
+					ws->set_was_object_pool_loaded_from_non_volatile_memory(false, {});
+				}
+				else
+				{
+					send_end_of_object_pool_response(true, NULL_OBJECT_ID, NULL_OBJECT_ID, 0, ws->get_control_function());
+				}
 				if (isobus::NULL_CAN_ADDRESS == activeWorkingSetMasterAddress)
 				{
 					activeWorkingSet = ws;
