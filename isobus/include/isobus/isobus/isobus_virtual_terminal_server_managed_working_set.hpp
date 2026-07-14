@@ -94,6 +94,16 @@ namespace isobus
 		/// @param[in] value True if this pool was loaded via a Load Version Command, otherwise false (transferred normally)
 		void set_was_object_pool_loaded_from_non_volatile_memory(bool value, CANLibBadge<VirtualTerminalServer>);
 
+		/// @brief Returns the VT version the working set master reported in its Working Set Maintenance
+		/// message (ISO 11783-6 G.3). Values: 3, 4, 5, or 0xFF for version 2 and prior. Defaults to
+		/// 0xFF until a maintenance message is received.
+		/// @returns The working set master's reported VT version byte
+		std::uint8_t get_working_set_maintenance_version() const;
+
+		/// @brief Stores the VT version the working set master reported in its Working Set Maintenance message.
+		/// @param[in] value The reported version byte (3, 4, 5, or 0xFF for version 2 and prior)
+		void set_working_set_maintenance_version(std::uint8_t value, CANLibBadge<VirtualTerminalServer>);
+
 		/// @brief Sets the object ID of the currently focused object
 		/// @param[in] objectID The object ID to set as the focused object
 		void set_object_focus(std::uint16_t objectID);
@@ -150,6 +160,7 @@ namespace isobus
 		std::uint16_t focusedObject = NULL_OBJECT_ID; ///< Stores the object ID of the currently focused object
 		bool wasLoadedFromNonVolatileMemory = false; ///< Used to tell the server how this object pool was obtained
 		bool workingSetDeletionRequested = false; ///< Used to tell the server to delete this working set
+		std::uint8_t workingSetMaintenanceVersion = 0xFF; ///< The VT version the master reported in Working Set Maintenance (0xFF = version 2 and prior, the conservative default)
 	};
 } // namespace isobus
 

@@ -98,6 +98,16 @@ namespace isobus
 		wasLoadedFromNonVolatileMemory = value;
 	}
 
+	std::uint8_t VirtualTerminalServerManagedWorkingSet::get_working_set_maintenance_version() const
+	{
+		return workingSetMaintenanceVersion;
+	}
+
+	void VirtualTerminalServerManagedWorkingSet::set_working_set_maintenance_version(std::uint8_t value, CANLibBadge<VirtualTerminalServer>)
+	{
+		workingSetMaintenanceVersion = value;
+	}
+
 	void VirtualTerminalServerManagedWorkingSet::set_object_focus(std::uint16_t objectID)
 	{
 		focusedObject = objectID;

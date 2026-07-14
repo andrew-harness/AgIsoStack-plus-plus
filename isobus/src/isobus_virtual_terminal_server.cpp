@@ -232,6 +232,7 @@ namespace isobus
 					LOG_WARNING("[VT Server]: Client %u version %u is higher than our reported version, which is %u", managedWorkingSetList.back()->get_control_function()->get_address(), data[2], get_vt_version_byte(get_version()));
 				}
 				managedWorkingSetList.back()->set_working_set_maintenance_message_timestamp_ms(SystemTiming::get_timestamp_ms());
+				managedWorkingSetList.back()->set_working_set_maintenance_version(data[2], {});
 				retVal = true;
 			}
 		}
