@@ -108,6 +108,16 @@ namespace isobus
 		workingSetMaintenanceVersion = value;
 	}
 
+	std::uint16_t VirtualTerminalServerManagedWorkingSet::get_active_colour_map_object_id() const
+	{
+		return activeColourMapObjectId;
+	}
+
+	void VirtualTerminalServerManagedWorkingSet::set_active_colour_map_object_id(std::uint16_t value, CANLibBadge<VirtualTerminalServer>)
+	{
+		activeColourMapObjectId = value;
+	}
+
 	void VirtualTerminalServerManagedWorkingSet::set_object_focus(std::uint16_t objectID)
 	{
 		focusedObject = objectID;

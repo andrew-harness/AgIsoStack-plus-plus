@@ -989,6 +989,42 @@ namespace isobus
 			}
 			break;
 
+			case Function::SelectColourMapCommand:
+			{
+				auto objectId = get_little_endian_uint16(data, 1);
+
+				if (NULL_OBJECT_ID == objectId)
+				{
+					managedWorkingSet->set_active_colour_map_object_id(NULL_OBJECT_ID, {});
+					send_select_colour_map_response(objectId, 0, managedWorkingSet->get_control_function());
+					onRepaintEventDispatcher.call(managedWorkingSet);
+					LOG_DEBUG("[VT Server]: Client %u select colour map command restored the default palette", managedWorkingSet->get_control_function()->get_address());
+				}
+				else
+				{
+					auto object = managedWorkingSet->get_object_by_id(objectId);
+
+					if (nullptr == object)
+					{
+						send_select_colour_map_response(objectId, get_bit(static_cast<std::uint8_t>(SelectColourMapErrorBit::InvalidObjectID)), managedWorkingSet->get_control_function());
+						LOG_WARNING("[VT Server]: Client %u select colour map failed because the object ID %u doesn't exist", managedWorkingSet->get_control_function()->get_address(), objectId);
+					}
+					else if (VirtualTerminalObjectType::ColourMap != object->get_object_type())
+					{
+						send_select_colour_map_response(objectId, get_bit(static_cast<std::uint8_t>(SelectColourMapErrorBit::InvalidColourMap)), managedWorkingSet->get_control_function());
+						LOG_WARNING("[VT Server]: Client %u select colour map failed because the object ID %u is not a Colour Map", managedWorkingSet->get_control_function()->get_address(), objectId);
+					}
+					else
+					{
+						managedWorkingSet->set_active_colour_map_object_id(objectId, {});
+						send_select_colour_map_response(objectId, 0, managedWorkingSet->get_control_function());
+						onRepaintEventDispatcher.call(managedWorkingSet);
+						LOG_DEBUG("[VT Server]: Client %u selected colour map object %u", managedWorkingSet->get_control_function()->get_address(), objectId);
+					}
+				}
+			}
+			break;
+
 			case Function::GetSupportedObjectsMessage:
 			{
 				send_supported_objects(message.get_source_control_function());
@@ -1951,6 +1987,33 @@ namespace isobus
 				static_cast<std::uint8_t>(Function::ChangeActiveMaskCommand),
 				get_low_byte(newMaskObjectID),
 				get_high_byte(newMaskObjectID),
+				errorBitfield,
+				0xFF,
+				0xFF,
+				0xFF,
+				0xFF
+			};
+
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+			                                                        buffer.data(),
+			                                                        CAN_DATA_LENGTH,
+			                                                        serverInternalControlFunction,
+			                                                        destination,
+			                                                        get_priority());
+		}
+		return retVal;
+	}
+
+	bool VirtualTerminalServer::send_select_colour_map_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+				static_cast<std::uint8_t>(Function::SelectColourMapCommand),
+				get_low_byte(objectID),
+				get_high_byte(objectID),
 				errorBitfield,
 				0xFF,
 				0xFF,

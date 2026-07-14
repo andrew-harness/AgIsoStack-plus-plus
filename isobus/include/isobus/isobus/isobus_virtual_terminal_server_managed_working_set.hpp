@@ -104,6 +104,15 @@ namespace isobus
 		/// @param[in] value The reported version byte (3, 4, 5, or 0xFF for version 2 and prior)
 		void set_working_set_maintenance_version(std::uint8_t value, CANLibBadge<VirtualTerminalServer>);
 
+		/// @brief Returns the object ID of the Colour Map selected by the Select Colour Map command (F.60)
+		/// for this working set, or NULL_OBJECT_ID when the default palette is in use.
+		/// @returns The active Colour Map object ID, or NULL_OBJECT_ID for the default palette
+		std::uint16_t get_active_colour_map_object_id() const;
+
+		/// @brief Stores the object ID of the Colour Map selected by the Select Colour Map command (F.60).
+		/// @param[in] value The Colour Map object ID to activate, or NULL_OBJECT_ID for the default palette
+		void set_active_colour_map_object_id(std::uint16_t value, CANLibBadge<VirtualTerminalServer>);
+
 		/// @brief Sets the object ID of the currently focused object
 		/// @param[in] objectID The object ID to set as the focused object
 		void set_object_focus(std::uint16_t objectID);
@@ -158,6 +167,7 @@ namespace isobus
 		std::uint32_t workingSetMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track sending of the maintenance message
 		std::uint32_t auxiliaryInputMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track if/when the working set sent an auxiliary input maintenance message
 		std::uint16_t focusedObject = NULL_OBJECT_ID; ///< Stores the object ID of the currently focused object
+		std::uint16_t activeColourMapObjectId = NULL_OBJECT_ID; ///< The object ID of the Colour Map selected by the Select Colour Map command (F.60), or NULL_OBJECT_ID for the default palette
 		bool wasLoadedFromNonVolatileMemory = false; ///< Used to tell the server how this object pool was obtained
 		bool workingSetDeletionRequested = false; ///< Used to tell the server to delete this working set
 		std::uint8_t workingSetMaintenanceVersion = 0xFF; ///< The VT version the master reported in Working Set Maintenance (0xFF = version 2 and prior, the conservative default)
