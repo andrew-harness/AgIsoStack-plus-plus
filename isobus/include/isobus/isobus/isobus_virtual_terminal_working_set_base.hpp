@@ -62,6 +62,14 @@ namespace isobus
 		/// @returns The object ID of the faulting object if parsing the object pool failed
 		std::uint16_t get_object_pool_faulting_object_id();
 
+		/// @brief Checks the transferred object pool size against the memory the client declared in its Get Memory message
+		/// @details Returns true unless the pool transferred more bytes than the declared size. A declared
+		/// size of 0 means no Get Memory has set a budget, so the bound does not apply and this returns true.
+		/// This is a size predicate only; a pool loaded from non-volatile memory is server-trusted and is
+		/// exempted from the check by the caller, not here.
+		/// @returns True if the transferred pool is within the declared memory, otherwise false
+		bool is_object_pool_within_declared_iop_size() const;
+
 	protected:
 		/// @brief Adds an object to the object tree, and replaces an object
 		/// if there's already one in the tree with the same ID.

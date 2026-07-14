@@ -81,6 +81,11 @@ namespace isobus
 		return faultingObjectID;
 	}
 
+	bool VirtualTerminalWorkingSetBase::is_object_pool_within_declared_iop_size() const
+	{
+		return (0 == iopSize) || (transferredIopSize <= iopSize);
+	}
+
 	void VirtualTerminalWorkingSetBase::add_iop_raw_data(const std::vector<std::uint8_t> &dataToAdd)
 	{
 		transferredIopSize += dataToAdd.size();

@@ -142,6 +142,11 @@ namespace isobus
 	{
 		const std::lock_guard<std::mutex> lock(managedWorkingSetMutex);
 		iopSize = newIopSize;
+		// Each Get Memory (or Load Version) declares the size of a fresh transfer, so the
+		// running transferred-byte count restarts here. This keeps transferredIopSize per
+		// declared transfer rather than a monotonic lifetime total, so the overrun check stays
+		// correct when a working set is reused (a Load Version or a runtime pool update).
+		transferredIopSize = 0;
 	}
 
 	float VirtualTerminalServerManagedWorkingSet::iop_load_percentage() const
@@ -185,6 +190,17 @@ namespace isobus
 
 	void VirtualTerminalServerManagedWorkingSet::worker_thread_function()
 	{
+		// Reject a pool that transferred more bytes than it declared in Get Memory (Annex D.3):
+		// the declared size was already vetted against the memory budget, so honouring it bounds
+		// the parse. transferredIopSize is reset per declared transfer (see set_iop_size), so this
+		// holds equally for a reused working set (Load Version, runtime pool update).
+		if (!is_object_pool_within_declared_iop_size())
+		{
+			LOG_ERROR("[WS]: Object pool transferred more than the declared memory; rejecting the pool.");
+			set_object_pool_processing_state(ObjectPoolProcessingThreadState::Fail);
+			return;
+		}
+
 		if (!iopFilesRawData.empty())
 		{
 			bool lSuccess = true;
