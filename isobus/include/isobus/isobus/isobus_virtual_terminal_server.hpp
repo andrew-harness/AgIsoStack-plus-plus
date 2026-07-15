@@ -606,6 +606,15 @@ namespace isobus
 		/// @returns true if the message was sent, otherwise false
 		bool send_select_colour_map_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
 
+		/// @brief Sends a response to an Auxiliary Capabilities request (VT function 0x27, ISO 11783-6 J.7.14)
+		/// @details Inventories every managed auxiliary unit whose object pool contains objects of the requested
+		/// aux kind. For each such unit the response carries the unit's NAME followed by one Set Information record
+		/// per distinct (Function attribute, Assigned attribute) pair, with the number of instances of that pair.
+		/// @param[in] requestType The request type from the request message: 0 = Auxiliary Input Units, 1 = Auxiliary Function Units
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false
+		bool send_auxiliary_capabilities_response(std::uint8_t requestType, std::shared_ptr<ControlFunction> destination) const;
+
 		/// @brief Sends a response to a change background colour command
 		/// @param[in] objectID The object ID for the object to change
 		/// @param[in] errorBitfield An error bitfield

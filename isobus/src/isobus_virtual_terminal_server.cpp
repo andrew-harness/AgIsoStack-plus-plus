@@ -472,6 +472,18 @@ namespace isobus
 			}
 			break;
 
+			case Function::AuxiliaryCapabilitiesRequest:
+			{
+				if (data.size() >= 2)
+				{
+					const std::uint8_t requestType = data.at(1);
+					LOG_DEBUG("[VT Server]: Client at address %u requested Auxiliary Capabilities (request type %u).", message.get_identifier().get_source_address(), requestType);
+					send_auxiliary_capabilities_response(requestType, message.get_source_control_function());
+					retVal = true;
+				}
+			}
+			break;
+
 			default:
 				break;
 		}
@@ -2024,6 +2036,129 @@ namespace isobus
 			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 			                                                        buffer.data(),
 			                                                        CAN_DATA_LENGTH,
+			                                                        serverInternalControlFunction,
+			                                                        destination,
+			                                                        get_priority());
+		}
+		return retVal;
+	}
+
+	bool VirtualTerminalServer::send_auxiliary_capabilities_response(std::uint8_t requestType, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			// A distinct Set Information record for each (Function attribute, Assigned attribute) pair within a unit.
+			struct SetInfo
+			{
+				std::uint8_t functionAttribute;
+				std::uint8_t assignedAttribute;
+				std::uint16_t instanceCount;
+			};
+
+			// Assigned attribute bit0: 0 = auxiliary input, 1 = auxiliary function. Bit1 (input assigned) stays 0
+			// until an assignment engine exists.
+			VirtualTerminalObjectType targetObjectType = VirtualTerminalObjectType::AuxiliaryFunctionType2;
+			std::uint8_t assignedAttributeBase = 0x01;
+			bool validRequestType = true;
+
+			if (1 == requestType)
+			{
+				targetObjectType = VirtualTerminalObjectType::AuxiliaryFunctionType2;
+				assignedAttributeBase = 0x01;
+			}
+			else if (0 == requestType)
+			{
+				targetObjectType = VirtualTerminalObjectType::AuxiliaryInputType2;
+				assignedAttributeBase = 0x00;
+			}
+			else
+			{
+				// An unknown request type yields a well-formed response reporting zero units.
+				validRequestType = false;
+			}
+
+			std::vector<std::uint8_t> payload = { static_cast<std::uint8_t>(Function::AuxiliaryCapabilitiesRequest) };
+			payload.push_back(0); // Number of Auxiliary Units, filled in after the loop
+
+			std::size_t unitCount = 0;
+
+			if (validRequestType)
+			{
+				for (const auto &ws : managedWorkingSetList)
+				{
+					if ((nullptr == ws) || (nullptr == ws->get_control_function()))
+					{
+						continue;
+					}
+
+					std::vector<SetInfo> sets;
+					for (const auto &treeEntry : ws->get_object_tree())
+					{
+						const auto &object = treeEntry.second;
+						if ((nullptr == object) || (targetObjectType != object->get_object_type()))
+						{
+							continue;
+						}
+
+						// AID 2 (FunctionAttributes) returns the whole Function Attributes byte for both aux Type 2 objects.
+						std::uint32_t raw = 0;
+						object->get_attribute(static_cast<std::uint8_t>(AuxiliaryFunctionType2::AttributeName::FunctionAttributes), raw);
+						const std::uint8_t functionAttribute = static_cast<std::uint8_t>(raw & 0xFF);
+						const std::uint8_t assignedAttribute = assignedAttributeBase;
+
+						bool merged = false;
+						for (auto &set : sets)
+						{
+							if ((set.functionAttribute == functionAttribute) && (set.assignedAttribute == assignedAttribute))
+							{
+								if (set.instanceCount < 0xFFFF)
+								{
+									set.instanceCount++;
+								}
+								merged = true;
+								break;
+							}
+						}
+						if (!merged)
+						{
+							sets.push_back({ functionAttribute, assignedAttribute, 1 });
+						}
+					}
+
+					if (sets.empty())
+					{
+						// Only units that actually have aux objects of the requested kind are reported.
+						continue;
+					}
+
+					const std::uint64_t fullName = ws->get_control_function()->get_NAME().get_full_name();
+					for (std::uint8_t nameByte = 0; nameByte < 8; nameByte++)
+					{
+						payload.push_back(static_cast<std::uint8_t>((fullName >> (8U * nameByte)) & 0xFFU));
+					}
+
+					const std::uint8_t numberOfSets = (sets.size() > 255) ? 255 : static_cast<std::uint8_t>(sets.size());
+					payload.push_back(numberOfSets);
+					for (std::uint8_t setIndex = 0; setIndex < numberOfSets; setIndex++)
+					{
+						const SetInfo &set = sets[setIndex];
+						payload.push_back((set.instanceCount > 255) ? 255 : static_cast<std::uint8_t>(set.instanceCount));
+						payload.push_back(set.functionAttribute);
+						payload.push_back(set.assignedAttribute);
+					}
+
+					unitCount++;
+				}
+			}
+
+			payload[1] = (unitCount > 255) ? 255 : static_cast<std::uint8_t>(unitCount);
+
+			// Pass the true payload size so responses larger than a single frame use the transport protocol.
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+			                                                        payload.data(),
+			                                                        static_cast<std::uint32_t>(payload.size()),
 			                                                        serverInternalControlFunction,
 			                                                        destination,
 			                                                        get_priority());
