@@ -1756,11 +1756,98 @@ namespace isobus
 			}
 			break;
 
+			case Function::PreferredAssignmentCommand:
+			{
+				// Variable-length command (J.7.7), possibly reassembled from the transport protocol. Every field is
+				// bounds-checked against the message length; a truncated/malformed buffer routes an empty list.
+				std::vector<AuxiliaryPreferredAssignmentEntry> entries;
+				const std::uint32_t dataLength = message.get_data_length();
+				bool malformed = (dataLength < 2);
+
+				if (!malformed)
+				{
+					const std::uint8_t numberOfInputUnits = message.get_uint8_at(1);
+					std::uint32_t offset = 2;
+
+					for (std::uint8_t unitIndex = 0; (unitIndex < numberOfInputUnits) && !malformed; unitIndex++)
+					{
+						// Each input unit header is NAME (8) + Model Identification Code (2) + number of functions (1).
+						if (offset + 11 > dataLength)
+						{
+							malformed = true;
+							break;
+						}
+
+						const std::uint64_t inputUnitName = message.get_uint64_at(offset);
+						const std::uint16_t modelIdentificationCode = message.get_uint16_at(offset + 8);
+						const std::uint8_t numberOfFunctions = message.get_uint8_at(offset + 10);
+						offset += 11;
+
+						for (std::uint8_t functionIndex = 0; functionIndex < numberOfFunctions; functionIndex++)
+						{
+							// Each function record is Function OID (2) + Input OID (2).
+							if (offset + 4 > dataLength)
+							{
+								malformed = true;
+								break;
+							}
+
+							AuxiliaryPreferredAssignmentEntry entry;
+							entry.inputUnitName = inputUnitName;
+							entry.modelIdentificationCode = modelIdentificationCode;
+							entry.functionObjectId = message.get_uint16_at(offset);
+							entry.inputObjectId = message.get_uint16_at(offset + 2);
+							entries.push_back(entry);
+							offset += 4;
+						}
+					}
+				}
+
+				if (malformed)
+				{
+					entries.clear();
+					LOG_DEBUG("[VT Server]: Client %u sent a malformed Preferred Assignment command; routing an empty assignment list.", managedWorkingSet->get_control_function()->get_address());
+				}
+				on_auxiliary_preferred_assignment_received(managedWorkingSet, entries);
+			}
+			break;
+
 			case Function::AuxiliaryInputTypeTwoMaintenanceMessage:
 			{
-				// Todo? auto modelIdentificationCode = static_cast<std::uint16_t>(static_cast<std::uint16_t>(data[1]) | (static_cast<std::uint16_t>(data[2]) << 8));
-				// Todo? bool isReady = (1 == data[3]);
 				managedWorkingSet->set_auxiliary_input_maintenance_timestamp_ms(SystemTiming::get_timestamp_ms());
+
+				if (message.get_data_length() >= 4)
+				{
+					const std::uint16_t modelIdentificationCode = message.get_uint16_at(1);
+					const bool ready = (1 == message.get_uint8_at(3));
+					on_auxiliary_input_maintenance_received(managedWorkingSet, modelIdentificationCode, ready);
+				}
+			}
+			break;
+
+			case Function::AuxiliaryAssignmentTypeTwoCommand:
+			{
+				// Mux 0x24 is shared: an incoming message at the VT is always the 8-byte response (J.7.6);
+				// the 14-byte form is the VT's own outgoing command, so only the short form is a response.
+				if ((message.get_data_length() >= 4) && (message.get_data_length() < 14))
+				{
+					const std::uint16_t functionObjectId = message.get_uint16_at(1);
+					const std::uint8_t errorCode = message.get_uint8_at(3);
+					on_auxiliary_assignment_response_received(managedWorkingSet, functionObjectId, errorCode);
+				}
+			}
+			break;
+
+			case Function::AuxiliaryInputStatusTypeTwoEnableCommand:
+			{
+				// An incoming message at the VT is the 8-byte enable response (J.7.12).
+				if (message.get_data_length() >= 5)
+				{
+					const std::uint16_t inputObjectId = message.get_uint16_at(1);
+					const std::uint8_t status = message.get_uint8_at(3);
+					const std::uint8_t errorCode = message.get_uint8_at(4);
+					on_auxiliary_input_status_enable_response_received(managedWorkingSet, inputObjectId, status, errorCode);
+				}
 			}
 			break;
 
@@ -2159,6 +2246,123 @@ namespace isobus
 			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 			                                                        payload.data(),
 			                                                        static_cast<std::uint32_t>(payload.size()),
+			                                                        serverInternalControlFunction,
+			                                                        destination,
+			                                                        get_priority());
+		}
+		return retVal;
+	}
+
+	void VirtualTerminalServer::on_auxiliary_preferred_assignment_received(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> functionWorkingSet, const std::vector<AuxiliaryPreferredAssignmentEntry> &entries)
+	{
+		(void)functionWorkingSet;
+		(void)entries;
+	}
+
+	void VirtualTerminalServer::on_auxiliary_input_maintenance_received(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> inputWorkingSet, std::uint16_t modelIdentificationCode, bool ready)
+	{
+		(void)inputWorkingSet;
+		(void)modelIdentificationCode;
+		(void)ready;
+	}
+
+	void VirtualTerminalServer::on_auxiliary_assignment_response_received(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> functionWorkingSet, std::uint16_t functionObjectId, std::uint8_t errorCode)
+	{
+		(void)functionWorkingSet;
+		(void)functionObjectId;
+		(void)errorCode;
+	}
+
+	void VirtualTerminalServer::on_auxiliary_input_status_enable_response_received(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> inputWorkingSet, std::uint16_t inputObjectId, std::uint8_t status, std::uint8_t errorCode)
+	{
+		(void)inputWorkingSet;
+		(void)inputObjectId;
+		(void)status;
+		(void)errorCode;
+	}
+
+	bool VirtualTerminalServer::send_preferred_assignment_response(std::uint8_t errorBits, std::uint16_t faultyFunctionObjectId, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+				static_cast<std::uint8_t>(Function::PreferredAssignmentCommand),
+				errorBits,
+				get_low_byte(faultyFunctionObjectId),
+				get_high_byte(faultyFunctionObjectId),
+				0xFF,
+				0xFF,
+				0xFF,
+				0xFF
+			};
+
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+			                                                        buffer.data(),
+			                                                        CAN_DATA_LENGTH,
+			                                                        serverInternalControlFunction,
+			                                                        destination,
+			                                                        get_priority());
+		}
+		return retVal;
+	}
+
+	bool VirtualTerminalServer::send_auxiliary_input_status_type_2_enable(std::uint16_t inputObjectId, bool enable, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+				static_cast<std::uint8_t>(Function::AuxiliaryInputStatusTypeTwoEnableCommand),
+				get_low_byte(inputObjectId),
+				get_high_byte(inputObjectId),
+				static_cast<std::uint8_t>(enable ? 0x01 : 0x00),
+				0xFF,
+				0xFF,
+				0xFF,
+				0xFF
+			};
+
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+			                                                        buffer.data(),
+			                                                        CAN_DATA_LENGTH,
+			                                                        serverInternalControlFunction,
+			                                                        destination,
+			                                                        get_priority());
+		}
+		return retVal;
+	}
+
+	bool VirtualTerminalServer::send_auxiliary_assignment_type_2(std::uint64_t inputUnitName, std::uint8_t functionType, std::uint16_t inputObjectId, std::uint16_t functionObjectId, bool storeAsPreferred, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			// Flags byte: bit7 = 0 to store as preferred (1 otherwise), bits 6-5 reserved 0, bits 4-0 the function type.
+			const std::uint8_t flags = static_cast<std::uint8_t>((functionType & 0x1F) | (storeAsPreferred ? 0x00 : 0x80));
+			const std::array<std::uint8_t, 14> buffer = {
+				static_cast<std::uint8_t>(Function::AuxiliaryAssignmentTypeTwoCommand),
+				static_cast<std::uint8_t>(inputUnitName & 0xFF),
+				static_cast<std::uint8_t>((inputUnitName >> 8) & 0xFF),
+				static_cast<std::uint8_t>((inputUnitName >> 16) & 0xFF),
+				static_cast<std::uint8_t>((inputUnitName >> 24) & 0xFF),
+				static_cast<std::uint8_t>((inputUnitName >> 32) & 0xFF),
+				static_cast<std::uint8_t>((inputUnitName >> 40) & 0xFF),
+				static_cast<std::uint8_t>((inputUnitName >> 48) & 0xFF),
+				static_cast<std::uint8_t>((inputUnitName >> 56) & 0xFF),
+				flags,
+				get_low_byte(inputObjectId),
+				get_high_byte(inputObjectId),
+				get_low_byte(functionObjectId),
+				get_high_byte(functionObjectId)
+			};
+
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+			                                                        buffer.data(),
+			                                                        static_cast<std::uint32_t>(buffer.size()),
 			                                                        serverInternalControlFunction,
 			                                                        destination,
 			                                                        get_priority());

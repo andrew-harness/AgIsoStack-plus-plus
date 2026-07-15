@@ -532,6 +532,16 @@ namespace isobus
 			AnyOtherError = 32
 		};
 
+		/// @brief One (function -> input) pair decoded from a Preferred Assignment command (J.7.7), tagged with its
+		/// auxiliary input unit's NAME and Model Identification Code.
+		struct AuxiliaryPreferredAssignmentEntry
+		{
+			std::uint64_t inputUnitName; ///< The NAME of the auxiliary input unit the pair belongs to
+			std::uint16_t modelIdentificationCode; ///< The Model Identification Code of the auxiliary input unit
+			std::uint16_t functionObjectId; ///< The object ID of the auxiliary function in our object pool
+			std::uint16_t inputObjectId; ///< The object ID of the auxiliary input on the input unit
+		};
+
 		/// @brief Checks to see if the message should be listened to based on
 		/// what the message is, and if the client has sent the proper working set master message
 		/// @param[in] message The CAN message to check
@@ -614,6 +624,59 @@ namespace isobus
 		/// @param[in] destination The control function to send the message to
 		/// @returns true if the message was sent, otherwise false
 		bool send_auxiliary_capabilities_response(std::uint8_t requestType, std::shared_ptr<ControlFunction> destination) const;
+
+		/// @brief Called when a Preferred Assignment command (0x22, J.7.7) is received from a working set.
+		/// @details The base implementation does nothing. A subclass implementing the AUX-N assignment engine
+		/// overrides this to act on the requested preferred assignments.
+		/// @param[in] functionWorkingSet The working set that sent the command
+		/// @param[in] entries The flattened (function -> input) pairs decoded from the command, or an empty list if the command was malformed
+		virtual void on_auxiliary_preferred_assignment_received(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> functionWorkingSet, const std::vector<AuxiliaryPreferredAssignmentEntry> &entries);
+
+		/// @brief Called when an Auxiliary Input Type 2 Maintenance message (0x23, J.7.10) is received from a working set.
+		/// @details The base implementation does nothing. A subclass overrides this to track auxiliary input unit readiness.
+		/// @param[in] inputWorkingSet The working set that sent the message
+		/// @param[in] modelIdentificationCode The Model Identification Code reported by the auxiliary input unit
+		/// @param[in] ready True if the unit reports it is ready (status 1), false if it is initializing (status 0)
+		virtual void on_auxiliary_input_maintenance_received(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> inputWorkingSet, std::uint16_t modelIdentificationCode, bool ready);
+
+		/// @brief Called when an Auxiliary Assignment Type 2 response (0x24, J.7.6) is received from a working set.
+		/// @details The base implementation does nothing. A subclass overrides this to process assignment results.
+		/// @param[in] functionWorkingSet The working set that sent the response
+		/// @param[in] functionObjectId The object ID of the auxiliary function the response refers to
+		/// @param[in] errorCode The error codes reported by the responder
+		virtual void on_auxiliary_assignment_response_received(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> functionWorkingSet, std::uint16_t functionObjectId, std::uint8_t errorCode);
+
+		/// @brief Called when an Auxiliary Input Status Type 2 Enable response (0x25, J.7.12) is received from a working set.
+		/// @details The base implementation does nothing. A subclass overrides this to process the enable/disable result.
+		/// @param[in] inputWorkingSet The working set that sent the response
+		/// @param[in] inputObjectId The object ID of the auxiliary input the response refers to
+		/// @param[in] status The enable state reported by the responder (0 = disabled, 1 = enabled)
+		/// @param[in] errorCode The error codes reported by the responder
+		virtual void on_auxiliary_input_status_enable_response_received(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> inputWorkingSet, std::uint16_t inputObjectId, std::uint8_t status, std::uint8_t errorCode);
+
+		/// @brief Sends a Preferred Assignment response (0x22, VT->ECU, J.7.8)
+		/// @param[in] errorBits The error bitfield to report
+		/// @param[in] faultyFunctionObjectId The object ID of the auxiliary function that caused the fault, or NULL_OBJECT_ID
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false
+		bool send_preferred_assignment_response(std::uint8_t errorBits, std::uint16_t faultyFunctionObjectId, std::shared_ptr<ControlFunction> destination) const;
+
+		/// @brief Sends an Auxiliary Input Status Type 2 Enable command (0x25, VT->ECU, J.7.11)
+		/// @param[in] inputObjectId The object ID of the auxiliary input to enable or disable
+		/// @param[in] enable True to enable status messages for the input, false to disable them
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false
+		bool send_auxiliary_input_status_type_2_enable(std::uint16_t inputObjectId, bool enable, std::shared_ptr<ControlFunction> destination) const;
+
+		/// @brief Sends an Auxiliary Assignment Type 2 command (0x24, VT->ECU, J.7.5)
+		/// @param[in] inputUnitName The NAME of the auxiliary input unit the assignment targets
+		/// @param[in] functionType The auxiliary function type (0-14), or 0x1F to remove the assignment
+		/// @param[in] inputObjectId The object ID of the auxiliary input to assign
+		/// @param[in] functionObjectId The object ID of the auxiliary function to assign
+		/// @param[in] storeAsPreferred True to request the assignment be stored as a preferred assignment
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false
+		bool send_auxiliary_assignment_type_2(std::uint64_t inputUnitName, std::uint8_t functionType, std::uint16_t inputObjectId, std::uint16_t functionObjectId, bool storeAsPreferred, std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends a response to a change background colour command
 		/// @param[in] objectID The object ID for the object to change
