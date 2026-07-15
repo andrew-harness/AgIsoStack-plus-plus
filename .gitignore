@@ -65,3 +65,10 @@ CMakeFiles
 *.orig
 *.rej
 
+
+# Vector XL Driver Library SDK files are Vector's proprietary, licensed software and are
+# user-provided, not distributed with this project (see the VectorXL block in
+# hardware_integration/CMakeLists.txt).
+hardware_integration/include/isobus/hardware_integration/vxlapi.h
+hardware_integration/lib/Windows/vxlapi.lib
+hardware_integration/lib/Windows/vxlapi64.lib

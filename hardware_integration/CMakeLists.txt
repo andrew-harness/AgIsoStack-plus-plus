@@ -42,6 +42,11 @@ if("WindowsPCANBasic" IN_LIST CAN_DRIVER)
   list(APPEND HARDWARE_INTEGRATION_SRC "pcan_basic_windows_plugin.cpp")
   list(APPEND HARDWARE_INTEGRATION_INCLUDE "pcan_basic_windows_plugin.hpp")
 endif()
+if("VectorXL" IN_LIST CAN_DRIVER)
+  list(APPEND HARDWARE_INTEGRATION_SRC "vector_xl_plugin.cpp")
+  list(APPEND HARDWARE_INTEGRATION_INCLUDE "vector_xl_plugin.hpp")
+  list(APPEND HARDWARE_INTEGRATION_INCLUDE "vxlapi.h")
+endif()
 if("VirtualCAN" IN_LIST CAN_DRIVER)
   list(APPEND HARDWARE_INTEGRATION_SRC "virtual_can_plugin.cpp")
   list(APPEND HARDWARE_INTEGRATION_INCLUDE "virtual_can_plugin.hpp")
@@ -179,6 +184,76 @@ if("WindowsPCANBasic" IN_LIST CAN_DRIVER)
     message(
       FATAL_ERROR
         "Windows PCAN Selected but no supported processor arch was detected. Only x64, x86, and ARM64 are supported by PEAK's drivers."
+    )
+  endif()
+endif()
+
+if("VectorXL" IN_LIST CAN_DRIVER)
+  if(MSVC)
+    # See https://gitlab.kitware.com/cmake/cmake/-/issues/15170
+    set(CMAKE_SYSTEM_PROCESSOR ${MSVC_CXX_ARCHITECTURE_ID})
+  endif()
+
+  message(
+    AUTHOR_WARNING
+      "Use of the Vector XL Driver Library is governed by Vector's license, and requires you to install their driver first. Visit https://www.vector.com/ to download the driver."
+  )
+
+  # The Vector XL SDK (vxlapi.h and its import library) is Vector's proprietary, licensed software
+  # and is not distributed with this project. Install the Vector XL Driver Library, then copy its
+  # bin/vxlapi.h into hardware_integration/include/isobus/hardware_integration/ and its
+  # bin/vxlapi64.lib (x64) / bin/vxlapi.lib (x86) into hardware_integration/lib/Windows/.
+  if(NOT EXISTS
+     "${CMAKE_CURRENT_LIST_DIR}/include/isobus/hardware_integration/vxlapi.h")
+    message(
+      FATAL_ERROR
+        "VectorXL selected but vxlapi.h was not found. Install the Vector XL Driver Library and copy its bin/vxlapi.h to hardware_integration/include/isobus/hardware_integration/ and its bin/vxlapi64.lib (x64) or bin/vxlapi.lib (x86) to hardware_integration/lib/Windows/."
+    )
+  endif()
+
+  message(STATUS "Target Arch: ${CMAKE_SYSTEM_PROCESSOR}")
+  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "AMD64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL
+                                                "x64")
+    message(STATUS "Detected AMD64, linking to Vector XL x64 Library")
+    if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/lib/Windows/vxlapi64.lib")
+      message(
+        FATAL_ERROR
+          "VectorXL (x64) selected but lib/Windows/vxlapi64.lib was not found. Copy it from the Vector XL Driver Library's bin/ folder."
+      )
+    endif()
+    target_link_libraries(
+      HardwareIntegration
+      PRIVATE ${CMAKE_CURRENT_LIST_DIR}/lib/Windows/vxlapi64.lib)
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/Windows/vxlapi64.lib
+      COMMENT "Copying vxlapi64.lib to build directory"
+      COMMAND
+        ${CMAKE_COMMAND} -E copy
+        ${CMAKE_CURRENT_LIST_DIR}/lib/Windows/vxlapi64.lib
+        ${CMAKE_CURRENT_BINARY_DIR}/vxlapi64.lib)
+  elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR CMAKE_SYSTEM_PROCESSOR
+                                                     STREQUAL "X86")
+    message(STATUS "Detected x86, linking to Vector XL x86 Library")
+    if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/lib/Windows/vxlapi.lib")
+      message(
+        FATAL_ERROR
+          "VectorXL (x86) selected but lib/Windows/vxlapi.lib was not found. Copy it from the Vector XL Driver Library's bin/ folder."
+      )
+    endif()
+    target_link_libraries(
+      HardwareIntegration
+      PRIVATE ${CMAKE_CURRENT_LIST_DIR}/lib/Windows/vxlapi.lib)
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/Windows/vxlapi.lib
+      COMMENT "Copying vxlapi.lib to build directory"
+      COMMAND
+        ${CMAKE_COMMAND} -E copy
+        ${CMAKE_CURRENT_LIST_DIR}/lib/Windows/vxlapi.lib
+        ${CMAKE_CURRENT_BINARY_DIR}/vxlapi.lib)
+  else()
+    message(
+      FATAL_ERROR
+        "Vector XL Selected but no supported processor arch was detected. Only x64 and x86 are supported by Vector's drivers."
     )
   endif()
 endif()

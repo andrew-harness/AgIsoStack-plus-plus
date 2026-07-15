@@ -18,6 +18,10 @@
 #include "isobus/hardware_integration/pcan_basic_windows_plugin.hpp"
 #endif
 
+#ifdef ISOBUS_VECTORXL_AVAILABLE
+#include "isobus/hardware_integration/vector_xl_plugin.hpp"
+#endif
+
 #ifdef ISOBUS_VIRTUALCAN_AVAILABLE
 #include "isobus/hardware_integration/virtual_can_plugin.hpp"
 #endif
