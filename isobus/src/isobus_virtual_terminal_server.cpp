@@ -1851,6 +1851,22 @@ namespace isobus
 			}
 			break;
 
+			case Function::AuxiliaryInputTypeTwoStatusMessage:
+			{
+				// In normal operation this status is broadcast for the assigned function working set;
+				// in learn mode the input unit sends it destination-specific to the VT (J.7.9).
+				// Whichever form reaches the server is surfaced to the subclass hook.
+				if (message.get_data_length() >= 8)
+				{
+					const std::uint16_t inputObjectId = message.get_uint16_at(1);
+					const std::uint16_t value1 = message.get_uint16_at(3);
+					const std::uint16_t value2 = message.get_uint16_at(5);
+					const std::uint8_t operatingState = message.get_uint8_at(7);
+					on_auxiliary_input_status_received(managedWorkingSet, inputObjectId, value1, value2, operatingState);
+				}
+			}
+			break;
+
 			case Function::ExecuteMacroCommand:
 			{
 				auto objectID = static_cast<std::uint16_t>(data[1]);
@@ -2279,6 +2295,26 @@ namespace isobus
 		(void)inputObjectId;
 		(void)status;
 		(void)errorCode;
+	}
+
+	void VirtualTerminalServer::on_auxiliary_input_status_received(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> inputWorkingSet, std::uint16_t inputObjectId, std::uint16_t value1, std::uint16_t value2, std::uint8_t operatingState)
+	{
+		(void)inputWorkingSet;
+		(void)inputObjectId;
+		(void)value1;
+		(void)value2;
+		(void)operatingState;
+	}
+
+	void VirtualTerminalServer::set_auxiliary_learn_mode_active(bool active)
+	{
+		if (active != auxiliaryInputLearnModeActive)
+		{
+			auxiliaryInputLearnModeActive = active;
+			// A learn-mode transition changes status byte 6, which the VT Status message must
+			// announce immediately rather than at the next 1 Hz cadence (G.2).
+			statusMessageTimestamp_ms = 0;
+		}
 	}
 
 	bool VirtualTerminalServer::send_preferred_assignment_response(std::uint8_t errorBits, std::uint16_t faultyFunctionObjectId, std::shared_ptr<ControlFunction> destination) const
@@ -3118,7 +3154,7 @@ namespace isobus
 		buffer[3] = get_high_byte(activeWorkingSetDataMaskObjectID);
 		buffer[4] = get_low_byte(activeWorkingSetSoftkeyMaskObjectID);
 		buffer[5] = get_high_byte(activeWorkingSetSoftkeyMaskObjectID);
-		buffer[6] = busyCodesBitfield;
+		buffer[6] = static_cast<std::uint8_t>(busyCodesBitfield | (auxiliaryInputLearnModeActive ? 0x40 : 0x00));
 		buffer[7] = currentCommandFunctionCode;
 		return CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 		                                                      buffer.data(),

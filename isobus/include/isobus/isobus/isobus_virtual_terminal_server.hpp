@@ -654,6 +654,25 @@ namespace isobus
 		/// @param[in] errorCode The error codes reported by the responder
 		virtual void on_auxiliary_input_status_enable_response_received(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> inputWorkingSet, std::uint16_t inputObjectId, std::uint8_t status, std::uint8_t errorCode);
 
+		/// @brief Called when an Auxiliary Input Type 2 Status message (0x26, J.7.9) is received from a working set.
+		/// @details The base implementation does nothing. In normal operation this status is broadcast and consumed
+		/// by the assigned function working set directly; in learn mode the input unit sends it destination-specific
+		/// to the VT. Whichever form reaches this server is surfaced here; a subclass overrides this to observe input
+		/// status (e.g. to capture the operator-activated input while learn mode is active).
+		/// @param[in] inputWorkingSet The working set that sent the status
+		/// @param[in] inputObjectId The object ID of the auxiliary input the status refers to
+		/// @param[in] value1 The first value reported by the input (meaning per function type, Table J.5)
+		/// @param[in] value2 The second value reported by the input
+		/// @param[in] operatingState The operating state byte (bit 0: learn mode active, bit 1: activated in learn mode)
+		virtual void on_auxiliary_input_status_received(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> inputWorkingSet, std::uint16_t inputObjectId, std::uint16_t value1, std::uint16_t value2, std::uint8_t operatingState);
+
+		/// @brief Sets whether the auxiliary input learn mode flag is reported in the VT status message.
+		/// @details While active, the status message's busy-codes byte carries the auxiliary-input learn mode
+		/// bit (0x40), which tells input units to send their Auxiliary Input Type 2 Status messages
+		/// destination-specific to this VT with the learn bits set in the operating state byte (J.7.9).
+		/// @param[in] active True to report learn mode active, false to report it inactive
+		void set_auxiliary_learn_mode_active(bool active);
+
 		/// @brief Sends a Preferred Assignment response (0x22, VT->ECU, J.7.8)
 		/// @param[in] errorBits The error bitfield to report
 		/// @param[in] faultyFunctionObjectId The object ID of the auxiliary function that caused the fault, or NULL_OBJECT_ID
@@ -895,6 +914,7 @@ namespace isobus
 		std::uint8_t activeWorkingSetMasterAddress = NULL_CAN_ADDRESS; ///< The address of the active working set's master
 		std::uint8_t busyCodesBitfield = 0; ///< The busy codes bitfield
 		std::uint8_t currentCommandFunctionCode = 0; ///< The current command function code being processed
+		bool auxiliaryInputLearnModeActive = false; ///< Whether the status message reports auxiliary input learn mode (busy-codes bit 0x40)
 		bool initialized = false; ///< True if the server has been initialized, otherwise false
 	};
 } // namespace isobus
