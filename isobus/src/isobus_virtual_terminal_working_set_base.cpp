@@ -186,6 +186,7 @@ namespace isobus
 											langCode.push_back(static_cast<char>(iopData[1]));
 											iopLength -= 2;
 											iopData += 2;
+											tempObject->add_language_code(langCode);
 											LOG_DEBUG("[WS]: IOP Language parsed: " + langCode);
 										}
 										retVal = true;

@@ -452,6 +452,14 @@ namespace isobus
 		/// @param[in] value The object ID of the active mask for this working set
 		void set_active_mask(std::uint16_t value);
 
+		/// @brief Adds a language code to the list of languages this working set supports
+		/// @param[in] languageCode A 2 character language code from the object's language list, like "en"
+		void add_language_code(std::string languageCode);
+
+		/// @brief Returns the list of 2 character language codes this working set declared support for
+		/// @returns The list of language codes parsed from the object's language list
+		const std::vector<std::string> &get_language_codes() const;
+
 	private:
 		static constexpr std::uint32_t MIN_OBJECT_LENGTH = 16; ///< The fewest bytes of IOP data that can represent this object
 

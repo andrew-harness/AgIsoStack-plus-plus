@@ -422,6 +422,16 @@ namespace isobus
 		activeMask = value;
 	}
 
+	void WorkingSet::add_language_code(std::string languageCode)
+	{
+		languageCodes.push_back(std::move(languageCode));
+	}
+
+	const std::vector<std::string> &WorkingSet::get_language_codes() const
+	{
+		return languageCodes;
+	}
+
 	VirtualTerminalObjectType DataMask::get_object_type() const
 	{
 		return VirtualTerminalObjectType::DataMask;
