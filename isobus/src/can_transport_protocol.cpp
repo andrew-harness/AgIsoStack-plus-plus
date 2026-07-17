@@ -664,7 +664,10 @@ namespace isobus
 			activeSessions.push_back(session);
 		}
 
-		update_state_machine(session);
+		// The state machine (which sends the RTS or Broadcast Announce) runs only on the update
+		// thread, in update(). Advancing it here would run it on the CALLER'S thread as well, and the
+		// two would race the newly created session -- both emitting the first frame, colliding the
+		// receiver's session. The first frame is instead sent on the next update() tick.
 		return true;
 	}
 
