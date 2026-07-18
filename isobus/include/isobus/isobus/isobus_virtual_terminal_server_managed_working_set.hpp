@@ -130,6 +130,14 @@ namespace isobus
 		/// @returns The object ID of the currently focused object
 		std::uint16_t get_object_focus() const;
 
+		/// @brief Sets the object ID of the object that is currently open for operator input
+		/// @param[in] objectID The object ID that is open for input, or NULL_OBJECT_ID if none is
+		void set_object_open_for_input(std::uint16_t objectID);
+
+		/// @brief Returns the object ID of the object that is currently open for operator input
+		/// @returns The object ID that is open for input, or NULL_OBJECT_ID if none is
+		std::uint16_t get_object_open_for_input() const;
+
 		/// @brief Sets the timestamp for when we received the last auxiliary input maintenance message
 		/// from the client.
 		/// @param[in] value New timestamp value in milliseconds
@@ -176,6 +184,7 @@ namespace isobus
 		std::uint32_t workingSetMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track sending of the maintenance message
 		std::uint32_t auxiliaryInputMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track if/when the working set sent an auxiliary input maintenance message
 		std::uint16_t focusedObject = NULL_OBJECT_ID; ///< Stores the object ID of the currently focused object
+		std::uint16_t objectOpenForInput = NULL_OBJECT_ID; ///< Stores the object ID of the object that is open for operator input, or NULL_OBJECT_ID when no input field is open
 		std::uint16_t activeColourMapObjectId = NULL_OBJECT_ID; ///< The object ID of the Colour Map selected by the Select Colour Map command (F.60), or NULL_OBJECT_ID for the default palette
 		bool wasLoadedFromNonVolatileMemory = false; ///< Used to tell the server how this object pool was obtained
 		bool loadedViaExtendedVersionCommand = false; ///< True when the pool was loaded via an Extended Load Version command (0xD5), so the deferred load response uses the extended command byte

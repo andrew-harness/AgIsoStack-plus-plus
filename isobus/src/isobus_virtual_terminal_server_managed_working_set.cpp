@@ -138,6 +138,16 @@ namespace isobus
 		return focusedObject;
 	}
 
+	void VirtualTerminalServerManagedWorkingSet::set_object_open_for_input(std::uint16_t objectID)
+	{
+		objectOpenForInput = objectID;
+	}
+
+	std::uint16_t VirtualTerminalServerManagedWorkingSet::get_object_open_for_input() const
+	{
+		return objectOpenForInput;
+	}
+
 	void VirtualTerminalServerManagedWorkingSet::set_auxiliary_input_maintenance_timestamp_ms(std::uint32_t value)
 	{
 		auxiliaryInputMaintenanceMessageTimestamp_ms = value;

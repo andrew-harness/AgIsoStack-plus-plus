@@ -1217,6 +1217,10 @@ namespace isobus
 					if (nullptr != managedWorkingSet->get_object_by_id(newActiveMaskObjectId))
 					{
 						std::static_pointer_cast<WorkingSet>(workingSetObject)->set_active_mask(newActiveMaskObjectId);
+
+						// An input field open for input belongs to the mask that was visible. Moving to
+						// another mask ends that input, so ESC must not report the field as still open.
+						managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
 						send_change_active_mask_response(newActiveMaskObjectId, 0, managedWorkingSet->get_control_function());
 
 						if (activeWorkingSet == managedWorkingSet)
@@ -1975,6 +1979,7 @@ namespace isobus
 								{
 									// 0 in Version 4+ means to activate the object for input
 									managedWorkingSet->set_object_focus(objectID);
+									managedWorkingSet->set_object_open_for_input(objectID);
 									LOG_DEBUG("[VT Server]: Client %u select input object %u and open for input", managedWorkingSet->get_control_function()->get_address(), objectID);
 									onFocusObjectEventDispatcher.call(managedWorkingSet, objectID, true);
 									send_select_input_object_response(objectID, 0, NULL_OBJECT_ID == objectID ? SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError : SelectInputObjectResponse::ObjectIsOpenedForEdit, message.get_source_control_function());
@@ -1984,6 +1989,10 @@ namespace isobus
 								{
 									// This removes focus if the ID is NULL_OBJECT_ID, or sets focus if not
 									managedWorkingSet->set_object_focus(objectID);
+
+									// F.7 answers this option with ObjectIsSelected rather than ObjectIsOpenedForEdit,
+									// so a selection ends any edit in progress and leaves no input field open.
+									managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
 									LOG_DEBUG("[VT Server]: Client %u select input object %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 									onFocusObjectEventDispatcher.call(managedWorkingSet, objectID, false);
 									send_select_input_object_response(objectID, 0, NULL_OBJECT_ID == objectID ? SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError : SelectInputObjectResponse::ObjectIsSelected, message.get_source_control_function());
@@ -2011,6 +2020,7 @@ namespace isobus
 							{
 								// 0 in Version 4+ means to activate the object for input
 								managedWorkingSet->set_object_focus(objectID);
+								managedWorkingSet->set_object_open_for_input(objectID);
 								LOG_DEBUG("[VT Server]: Client %u select input object %u and open for input", managedWorkingSet->get_control_function()->get_address(), objectID);
 								onFocusObjectEventDispatcher.call(managedWorkingSet, objectID, true);
 								send_select_input_object_response(objectID, 0, NULL_OBJECT_ID == objectID ? SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError : SelectInputObjectResponse::ObjectIsOpenedForEdit, message.get_source_control_function());
@@ -2020,6 +2030,10 @@ namespace isobus
 							{
 								// This removes focus if the ID is NULL_OBJECT_ID, or sets focus if not
 								managedWorkingSet->set_object_focus(objectID);
+
+								// F.7 answers this option with ObjectIsSelected rather than ObjectIsOpenedForEdit,
+								// so a selection ends any edit in progress and leaves no input field open.
+								managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
 								LOG_DEBUG("[VT Server]: Client %u select input object %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 								onFocusObjectEventDispatcher.call(managedWorkingSet, objectID, false);
 								send_select_input_object_response(objectID, 0, NULL_OBJECT_ID == objectID ? SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError : SelectInputObjectResponse::ObjectIsSelected, message.get_source_control_function());
@@ -2234,6 +2248,10 @@ namespace isobus
 				if (delete_object_pool(managedWorkingSet->get_control_function()->get_NAME()))
 				{
 					LOG_INFO("[VT Server]: Client %u object pool has been deactivated.", managedWorkingSet->get_control_function()->get_address());
+
+					// Deactivating the pool ends any input it had open, so ESC must not go on reporting
+					// a field of the deleted pool as open and running its macros.
+					managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
 					send_delete_object_pool_response(0, message.get_source_control_function());
 				}
 				else
@@ -2377,6 +2395,37 @@ namespace isobus
 					// whole required behaviour and no macro is run.
 					onRepaintEventDispatcher.call(managedWorkingSet);
 					LOG_DEBUG("[VT Server]: Client %u change polygon scale command: Object: %u, Width: %u, Height: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight);
+				}
+			}
+			break;
+
+			case Function::ESCCommand:
+			{
+				const std::uint16_t openObjectID = managedWorkingSet->get_object_open_for_input();
+
+				if (NULL_OBJECT_ID == openObjectID)
+				{
+					// F.9 defines bytes 2-3 only when no error is reported, so the standard's own
+					// "no object" sentinel is what this branch names.
+					send_esc_response(NULL_OBJECT_ID, get_bit(static_cast<std::uint8_t>(ESCErrorBit::NoInputFieldIsOpenForInput)), managedWorkingSet->get_control_function());
+					LOG_DEBUG("[VT Server]: Client %u ESC command: no input field is open for input, ESC ignored", managedWorkingSet->get_control_function()->get_address());
+				}
+				else
+				{
+					// must be cleared before process_macro: Select Input Object is an allowed macro
+					// command, so an OnESC macro may re-open an object for input, and that re-open has
+					// to survive this handler rather than being cleared after it.
+					managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
+					send_esc_response(openObjectID, 0, managedWorkingSet->get_control_function());
+					LOG_DEBUG("[VT Server]: Client %u ESC command: input aborted on object %u", managedWorkingSet->get_control_function()->get_address(), openObjectID);
+
+					auto targetObject = managedWorkingSet->get_object_by_id(openObjectID);
+
+					// A runtime object pool update can replace whatever occupies this object ID.
+					if (nullptr != targetObject)
+					{
+						process_macro(targetObject, EventID::OnESC, targetObject->get_object_type(), managedWorkingSet);
+					}
 				}
 			}
 			break;
@@ -3311,6 +3360,28 @@ namespace isobus
 			buffer[5] = get_low_byte(newHeight);
 			buffer[6] = get_high_byte(newHeight);
 			buffer[7] = errorBitfield;
+
+			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
+		}
+		return retVal;
+	}
+
+	bool VirtualTerminalServer::send_esc_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer;
+
+			buffer[0] = static_cast<std::uint8_t>(Function::ESCCommand);
+			buffer[1] = get_low_byte(objectID);
+			buffer[2] = get_high_byte(objectID);
+			buffer[3] = errorBitfield;
+			buffer[4] = 0xFF;
+			buffer[5] = 0xFF;
+			buffer[6] = 0xFF;
+			buffer[7] = 0xFF;
 
 			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
 		}

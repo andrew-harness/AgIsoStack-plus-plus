@@ -509,6 +509,13 @@ namespace isobus
 			AnyOtherError = 4
 		};
 
+		/// @brief Enumerates the bit indices of the error fields that can be set in an ESC response
+		enum class ESCErrorBit : std::uint8_t
+		{
+			NoInputFieldIsOpenForInput = 0,
+			AnyOtherError = 4
+		};
+
 		/// @brief Enumerates the bit indices of the error fields that can be set in a delete object pool response
 		enum class DeleteObjectPoolErrorBit : std::uint8_t
 		{
@@ -847,6 +854,13 @@ namespace isobus
 		/// @param[in] destination The control function to send the message to
 		/// @returns true if the message was sent, otherwise false
 		bool send_change_polygon_scale_response(std::uint16_t objectID, std::uint16_t newWidth, std::uint16_t newHeight, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
+
+		/// @brief Sends a response to an ESC command
+		/// @param[in] objectID The object ID of the object whose input was aborted, or NULL_OBJECT_ID when none was
+		/// @param[in] errorBitfield An error bitfield
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false
+		bool send_esc_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends a response to a change size command
 		/// @param[in] objectID The object ID for the object whose size was meant to be changed
