@@ -291,6 +291,11 @@ namespace isobus
 		return (VTVersion::Version6 == get_version()) ? CANIdentifier::CANPriority::Priority5 : CANIdentifier::CANPriority::PriorityLowest7;
 	}
 
+	std::vector<std::array<std::uint8_t, 32>> VirtualTerminalServer::get_extended_versions(NAME)
+	{
+		return {};
+	}
+
 	std::uint8_t VirtualTerminalServer::get_vt_version_byte(VTVersion version)
 	{
 		std::uint8_t retVal = 2;
@@ -527,6 +532,43 @@ namespace isobus
 				if (versions.size() > 255)
 				{
 					LOG_WARNING("[VT Server]: get_versions returned too many versions! This client should really delete some.");
+				}
+
+				buffer.push_back(static_cast<std::uint8_t>(versions.size() & 0xFF));
+
+				for (const auto &version : versions)
+				{
+					for (const auto &versionByte : version)
+					{
+						buffer.push_back(versionByte);
+					}
+				}
+
+				while (buffer.size() < CAN_DATA_LENGTH)
+				{
+					buffer.push_back(0xFF);
+				}
+				CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+				                                               buffer.data(),
+				                                               static_cast<std::uint32_t>(buffer.size()),
+				                                               serverInternalControlFunction,
+				                                               message.get_source_control_function(),
+				                                               get_priority());
+			}
+			break;
+
+			case Function::ExtendedGetVersionsMessage:
+			{
+				auto versions = get_extended_versions(message.get_source_control_function()->get_NAME());
+
+				std::vector<std::uint8_t> buffer;
+				buffer.push_back(static_cast<std::uint8_t>(Function::ExtendedGetVersionsMessage));
+
+				LOG_DEBUG("[VT Server]: Client %u requests stored extended versions", message.get_source_control_function()->get_address());
+
+				if (versions.size() > 255)
+				{
+					LOG_WARNING("[VT Server]: get_extended_versions returned too many versions! This client should really delete some.");
 				}
 
 				buffer.push_back(static_cast<std::uint8_t>(versions.size() & 0xFF));

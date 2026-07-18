@@ -179,6 +179,14 @@ namespace isobus
 		/// @returns A vector of object pool versions available for the client
 		virtual std::vector<std::array<std::uint8_t, 7>> get_versions(NAME clientNAME) = 0;
 
+		/// @brief This function is called when the interface needs to know what extended (32-byte) versions of object
+		/// pools are available for a client, in response to the Extended Get Versions message.
+		/// @note Unlike get_versions this is not pure virtual; the default returns empty so servers that do not persist
+		/// extended versions continue to compile and simply report no stored extended versions.
+		/// @param[in] clientNAME The client requesting the extended object pool versions
+		/// @returns A vector of 32-byte extended object pool version labels stored for the client, empty if none
+		virtual std::vector<std::array<std::uint8_t, 32>> get_extended_versions(NAME clientNAME);
+
 		/// @brief This function is called when the interface needs to know what objects are supported by the server.
 		/// @returns A vector of supported objects
 		virtual std::vector<std::uint8_t> get_supported_objects() const = 0;
@@ -898,6 +906,7 @@ namespace isobus
 		void update();
 
 		static constexpr std::uint8_t VERSION_LABEL_LENGTH = 7; ///< The length of a standard object pool version label
+		static constexpr std::uint8_t EXTENDED_VERSION_LABEL_LENGTH = 32; ///< The length of an extended object pool version label (VT v4+)
 
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>> onRepaintEventDispatcher; ///< Event dispatcher for repaint events
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t, std::uint16_t> onChangeActiveMaskEventDispatcher; ///< Event dispatcher for active data/alarm mask change events
