@@ -888,6 +888,25 @@ namespace isobus
 		/// @returns true if the message was sent, otherwise false
 		bool send_status_message() const;
 
+		/// @brief Flags that a VT Status field the standard tracks on change has been modified, so
+		/// the next update() transmits the status promptly instead of waiting for the 1 Hz tick.
+		void mark_status_message_changed();
+
+		/// @brief Returns the soft key mask that the specified Data Mask or Alarm Mask makes visible
+		/// @param[in] workingSet The working set that owns the mask object
+		/// @param[in] maskObjectId The object ID of the Data Mask or Alarm Mask to inspect
+		/// @returns The object ID of the mask's soft key mask, or NULL_OBJECT_ID if it has none
+		std::uint16_t get_visible_soft_key_mask(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet, std::uint16_t maskObjectId) const;
+
+		/// @brief Points the VT Status' visible-mask fields at the specified mask and its soft key mask
+		/// @param[in] workingSet The working set that owns the mask object
+		/// @param[in] maskObjectId The object ID of the Data Mask or Alarm Mask that is now visible
+		void set_active_mask_status_fields(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet, std::uint16_t maskObjectId);
+
+		/// @brief Recomputes the VT Status' visible-mask fields from the active working set's current state,
+		/// flagging the status only if either field actually moved (ISO 11783-6 G.2 bytes 3-6)
+		void refresh_active_mask_status_fields();
+
 		/// @brief Sends the list of objects that the server supports to a client, usually in
 		/// response to a "get supported objects" message, which is used by a client.
 		/// @param[in] destination The control function to send the message to
@@ -939,6 +958,7 @@ namespace isobus
 		std::uint8_t activeWorkingSetMasterAddress = NULL_CAN_ADDRESS; ///< The address of the active working set's master
 		std::uint8_t busyCodesBitfield = 0; ///< The busy codes bitfield
 		std::uint8_t currentCommandFunctionCode = 0; ///< The current command function code being processed
+		bool statusMessagePending = true; ///< Set when a VT Status field the standard tracks (ISO 11783-6 G.2 bytes 2-6, or byte 7 bit 6) changes, so update() transmits promptly instead of waiting for the next 1 Hz tick
 		bool auxiliaryInputLearnModeActive = false; ///< Whether the status message reports auxiliary input learn mode (busy-codes bit 0x40)
 		bool initialized = false; ///< True if the server has been initialized, otherwise false
 	};

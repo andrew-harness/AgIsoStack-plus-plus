@@ -1211,6 +1211,13 @@ namespace isobus
 					{
 						std::static_pointer_cast<WorkingSet>(workingSetObject)->set_active_mask(newActiveMaskObjectId);
 						send_change_active_mask_response(newActiveMaskObjectId, 0, managedWorkingSet->get_control_function());
+
+						if (activeWorkingSet == managedWorkingSet)
+						{
+							// The status reports the ACTIVE working set's visible mask (G.2 bytes 3-6), so a runtime mask
+							// change refreshes both it and the soft key mask that mask carries.
+							refresh_active_mask_status_fields();
+						}
 						onChangeActiveMaskEventDispatcher.call(managedWorkingSet, workingSetObjectId, newActiveMaskObjectId);
 						LOG_DEBUG("[VT Server]: Client %u changed active mask to object %u for working set object %u", managedWorkingSet->get_control_function()->get_address(), newActiveMaskObjectId, workingSetObjectId);
 					}
@@ -1501,6 +1508,13 @@ namespace isobus
 					{
 						send_change_attribute_response(objectID, 0, data.at(3), message.get_source_control_function());
 						LOG_DEBUG("[VT Server]: Client %u changed object %u attribute %u to %u", managedWorkingSet->get_control_function()->get_address(), objectID, attributeID, attributeData);
+
+						if (activeWorkingSet == managedWorkingSet)
+						{
+							// Change Attribute reaches the same state the dedicated commands do: attribute 3 on a Working Set
+							// retargets the active mask, and attribute 2 on a Data or Alarm Mask retargets its soft key mask.
+							refresh_active_mask_status_fields();
+						}
 						onRepaintEventDispatcher.call(managedWorkingSet);
 						process_macro(targetObject, EventID::OnChangeAttribute, targetObject->get_object_type(), managedWorkingSet);
 					}
@@ -1756,6 +1770,14 @@ namespace isobus
 								{
 									LOG_DEBUG("[VT Server]: Client %u change soft key mask command: alarm mask object %u to %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId, newSoftKeyMaskId);
 									send_change_soft_key_mask_response(dataOrAlarmMaskId, newSoftKeyMaskId, 0, message.get_source_control_function());
+
+									if (activeWorkingSet == managedWorkingSet)
+									{
+										// The status' soft key mask field (G.2 bytes 5-6) tracks the mask the active
+										// working set currently shows, so a change to a mask it does not show recomputes
+										// the same value and moves nothing.
+										refresh_active_mask_status_fields();
+									}
 									onChangeActiveSoftKeyMaskEventDispatcher.call(managedWorkingSet, dataOrAlarmMaskId, newSoftKeyMaskId);
 									process_macro(targetMask, EventID::OnChangeSoftKeyMask, VirtualTerminalObjectType::AlarmMask, managedWorkingSet);
 								}
@@ -1773,6 +1795,14 @@ namespace isobus
 								{
 									LOG_DEBUG("[VT Server]: Client %u change soft key mask command: data mask object %u to %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId, newSoftKeyMaskId);
 									send_change_soft_key_mask_response(dataOrAlarmMaskId, newSoftKeyMaskId, 0, message.get_source_control_function());
+
+									if (activeWorkingSet == managedWorkingSet)
+									{
+										// The status' soft key mask field (G.2 bytes 5-6) tracks the mask the active
+										// working set currently shows, so a change to a mask it does not show recomputes
+										// the same value and moves nothing.
+										refresh_active_mask_status_fields();
+									}
 									onChangeActiveSoftKeyMaskEventDispatcher.call(managedWorkingSet, dataOrAlarmMaskId, newSoftKeyMaskId);
 									process_macro(targetMask, EventID::OnChangeSoftKeyMask, VirtualTerminalObjectType::DataMask, managedWorkingSet);
 								}
@@ -2567,9 +2597,10 @@ namespace isobus
 		if (active != auxiliaryInputLearnModeActive)
 		{
 			auxiliaryInputLearnModeActive = active;
-			// A learn-mode transition changes status byte 6, which the VT Status message must
-			// announce immediately rather than at the next 1 Hz cadence (G.2).
-			statusMessageTimestamp_ms = 0;
+			// A learn-mode transition changes ISO status byte 7 bit 6, which G.2 lists as an on-change
+			// trigger, so it is announced promptly rather than at the next 1 Hz tick -- subject to the
+			// five-per-second ceiling update() enforces.
+			mark_status_message_changed();
 		}
 	}
 
@@ -3446,6 +3477,69 @@ namespace isobus
 		                                                      get_priority());
 	}
 
+	void VirtualTerminalServer::mark_status_message_changed()
+	{
+		statusMessagePending = true;
+	}
+
+	std::uint16_t VirtualTerminalServer::get_visible_soft_key_mask(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet, std::uint16_t maskObjectId) const
+	{
+		std::uint16_t retVal = NULL_OBJECT_ID;
+
+		if (nullptr != workingSet)
+		{
+			auto maskObject = workingSet->get_object_by_id(maskObjectId);
+
+			if (nullptr != maskObject)
+			{
+				if (VirtualTerminalObjectType::DataMask == maskObject->get_object_type())
+				{
+					retVal = std::static_pointer_cast<DataMask>(maskObject)->get_soft_key_mask();
+				}
+				else if (VirtualTerminalObjectType::AlarmMask == maskObject->get_object_type())
+				{
+					retVal = std::static_pointer_cast<AlarmMask>(maskObject)->get_soft_key_mask();
+				}
+			}
+		}
+		return retVal;
+	}
+
+	void VirtualTerminalServer::set_active_mask_status_fields(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet, std::uint16_t maskObjectId)
+	{
+		// The status' visible-mask fields (ISO 11783-6 G.2 bytes 3-6) report the mask the active
+		// working set shows and the soft key mask that mask carries.
+		activeWorkingSetDataMaskObjectID = maskObjectId;
+		activeWorkingSetSoftkeyMaskObjectID = get_visible_soft_key_mask(workingSet, maskObjectId);
+		mark_status_message_changed();
+	}
+
+	void VirtualTerminalServer::refresh_active_mask_status_fields()
+	{
+		if (nullptr == activeWorkingSet)
+		{
+			return;
+		}
+
+		auto workingSetObject = activeWorkingSet->get_working_set_object();
+
+		if (nullptr == workingSetObject)
+		{
+			return;
+		}
+
+		const std::uint16_t maskObjectId = std::static_pointer_cast<WorkingSet>(workingSetObject)->get_active_mask();
+		const std::uint16_t softKeyMaskObjectId = get_visible_soft_key_mask(activeWorkingSet, maskObjectId);
+
+		if ((maskObjectId != activeWorkingSetDataMaskObjectID) ||
+		    (softKeyMaskObjectId != activeWorkingSetSoftkeyMaskObjectID))
+		{
+			activeWorkingSetDataMaskObjectID = maskObjectId;
+			activeWorkingSetSoftkeyMaskObjectID = softKeyMaskObjectId;
+			mark_status_message_changed();
+		}
+	}
+
 	bool VirtualTerminalServer::send_supported_objects(std::shared_ptr<ControlFunction> destination) const
 	{
 		auto supportedObjects = get_supported_objects();
@@ -3529,10 +3623,35 @@ namespace isobus
 
 	void VirtualTerminalServer::update()
 	{
-		if ((isobus::SystemTiming::time_expired_ms(statusMessageTimestamp_ms, 1000)) &&
-		    (send_status_message()))
+		// G.2 byte 2 is the active working set master's address, which moves if that control function
+		// re-claims, so it is tracked rather than left at the value captured when the pool activated.
+		// A null address is not adopted: activeWorkingSetMasterAddress doubles as the "no working set is
+		// active" sentinel the activation branch below tests, so writing the null address here would let
+		// another working set claim activation while this one is still active. A master that truly goes
+		// away is dropped by the 4.6.9 teardown pass, which clears the address and activeWorkingSet together.
+		if (nullptr != activeWorkingSet)
+		{
+			auto activeControlFunction = activeWorkingSet->get_control_function();
+
+			if ((nullptr != activeControlFunction) &&
+			    (isobus::NULL_CAN_ADDRESS != activeControlFunction->get_address()) &&
+			    (activeControlFunction->get_address() != activeWorkingSetMasterAddress))
+			{
+				activeWorkingSetMasterAddress = activeControlFunction->get_address();
+				mark_status_message_changed();
+			}
+		}
+
+		const bool heartbeatDue = isobus::SystemTiming::time_expired_ms(statusMessageTimestamp_ms, 1000);
+		// G.2: the status is sent on change of any of bytes 2 to 6, or byte 7 bit 6, and once per second,
+		// up to a maximum of five per second, so a pending change waits out a 200 ms floor since the last
+		// transmission.
+		const bool changeDue = statusMessagePending && isobus::SystemTiming::time_expired_ms(statusMessageTimestamp_ms, 200);
+
+		if ((heartbeatDue || changeDue) && send_status_message())
 		{
 			statusMessageTimestamp_ms = isobus::SystemTiming::get_timestamp_ms();
+			statusMessagePending = false;
 		}
 
 		for (const auto &ws : managedWorkingSetList)
@@ -3566,7 +3685,12 @@ namespace isobus
 				{
 					activeWorkingSet = ws;
 					activeWorkingSetMasterAddress = ws->get_control_function()->get_address();
-					activeWorkingSetDataMaskObjectID = std::static_pointer_cast<WorkingSet>(ws->get_working_set_object())->get_active_mask();
+					set_active_mask_status_fields(ws, std::static_pointer_cast<WorkingSet>(ws->get_working_set_object())->get_active_mask());
+				}
+				else if (ws == activeWorkingSet)
+				{
+					// A runtime object pool update can retarget the active mask or its soft key mask.
+					refresh_active_mask_status_fields();
 				}
 			}
 			else if (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Fail == ws->get_object_pool_processing_state())
@@ -3653,6 +3777,7 @@ namespace isobus
 					activeWorkingSetMasterAddress = isobus::NULL_CAN_ADDRESS;
 					activeWorkingSetDataMaskObjectID = NULL_OBJECT_ID;
 					activeWorkingSetSoftkeyMaskObjectID = NULL_OBJECT_ID;
+					mark_status_message_changed();
 				}
 
 				if ((workingSetHasControlFunction) &&
