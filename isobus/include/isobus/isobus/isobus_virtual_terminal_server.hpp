@@ -502,6 +502,13 @@ namespace isobus
 			AnyOtherError = 4
 		};
 
+		/// @brief Enumerates the bit indices of the error fields that can be set in a change polygon scale response
+		enum class ChangePolygonScaleErrorBit : std::uint8_t
+		{
+			InvalidObjectID = 0,
+			AnyOtherError = 4
+		};
+
 		/// @brief Enumerates the bit indices of the error fields that can be set in a delete object pool response
 		enum class DeleteObjectPoolErrorBit : std::uint8_t
 		{
@@ -831,6 +838,15 @@ namespace isobus
 		/// @param[in] destination The control function to send the message to
 		/// @returns true if the message was sent, otherwise false
 		bool send_change_end_point_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
+
+		/// @brief Sends a response to a change polygon scale command
+		/// @param[in] objectID The object ID of the output polygon that was meant to be scaled
+		/// @param[in] newWidth The new width attribute the command carried, echoed back to the client
+		/// @param[in] newHeight The new height attribute the command carried, echoed back to the client
+		/// @param[in] errorBitfield An error bitfield
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false
+		bool send_change_polygon_scale_response(std::uint16_t objectID, std::uint16_t newWidth, std::uint16_t newHeight, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends a response to a change size command
 		/// @param[in] objectID The object ID for the object whose size was meant to be changed

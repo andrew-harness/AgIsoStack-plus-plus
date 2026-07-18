@@ -2318,6 +2318,69 @@ namespace isobus
 			}
 			break;
 
+			case Function::ChangePolygonScaleCommand:
+			{
+				auto objectID = get_little_endian_uint16(data, 1);
+				const std::uint16_t newWidth = get_little_endian_uint16(data, 3);
+				const std::uint16_t newHeight = get_little_endian_uint16(data, 5);
+				auto targetObject = managedWorkingSet->get_object_by_id(objectID);
+
+				if ((nullptr == targetObject) || (VirtualTerminalObjectType::OutputPolygon != targetObject->get_object_type()))
+				{
+					LOG_WARNING("[VT Server]: Client %u change polygon scale: object id %u is not an output polygon in this pool", managedWorkingSet->get_control_function()->get_address(), objectID);
+					send_change_polygon_scale_response(objectID, newWidth, newHeight, get_bit(static_cast<std::uint8_t>(ChangePolygonScaleErrorBit::InvalidObjectID)), managedWorkingSet->get_control_function());
+				}
+				else
+				{
+					auto polygon = std::static_pointer_cast<OutputPolygon>(targetObject);
+
+					// The rescale in F.54 divides by the enclosing area the points were authored against,
+					// so both old dimensions must be read before either attribute takes its new value.
+					const std::uint16_t oldWidth = polygon->get_width();
+					const std::uint16_t oldHeight = polygon->get_height();
+
+					for (std::uint8_t i = 0; i < polygon->get_number_of_points(); i++)
+					{
+						const OutputPolygon::PolygonPoint point = polygon->get_point(i);
+						std::uint16_t scaledX = point.xValue;
+						std::uint16_t scaledY = point.yValue;
+
+						// PolygonPoint stores coordinates unsigned, so F.54's negative-coordinate branch cannot
+						// arise here and only the positive branch, which rounds to nearest, is implemented.
+						// The products reach 65535 * 65535, which overflows the signed 32 bit math F.54 names,
+						// so they are formed in 64 bits and the quotient is clamped back into the point's range.
+						// An enclosing area of zero has no scale factor to apply, so that axis keeps the
+						// coordinates it was authored with rather than being divided by zero. F.54 defines no
+						// error for a degenerate enclosing area and F.55 carries no bit for one, so the
+						// command still reports success.
+						if (0 != oldWidth)
+						{
+							const std::int64_t newX = ((static_cast<std::int64_t>(point.xValue) * newWidth) + (oldWidth / 2)) / oldWidth;
+							scaledX = static_cast<std::uint16_t>((newX > 65535) ? 65535 : newX);
+						}
+
+						if (0 != oldHeight)
+						{
+							const std::int64_t newY = ((static_cast<std::int64_t>(point.yValue) * newHeight) + (oldHeight / 2)) / oldHeight;
+							scaledY = static_cast<std::uint16_t>((newY > 65535) ? 65535 : newY);
+						}
+
+						polygon->change_point(i, scaledX, scaledY);
+					}
+
+					polygon->set_width(newWidth);
+					polygon->set_height(newHeight);
+					send_change_polygon_scale_response(objectID, newWidth, newHeight, 0, managedWorkingSet->get_control_function());
+
+					// Table B.32 maps this command to the On Refresh event, which the EventID enum documents as
+					// having no associated event ID because macros cannot be attached to it, so a repaint is the
+					// whole required behaviour and no macro is run.
+					onRepaintEventDispatcher.call(managedWorkingSet);
+					LOG_DEBUG("[VT Server]: Client %u change polygon scale command: Object: %u, Width: %u, Height: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight);
+				}
+			}
+			break;
+
 			case Function::ControlAudioSignalCommand:
 			{
 				send_audio_signal_successful(message.get_source_control_function());
@@ -3224,6 +3287,30 @@ namespace isobus
 			buffer[5] = 0xFF;
 			buffer[6] = 0xFF;
 			buffer[7] = 0xFF;
+
+			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
+		}
+		return retVal;
+	}
+
+	bool VirtualTerminalServer::send_change_polygon_scale_response(std::uint16_t objectID, std::uint16_t newWidth, std::uint16_t newHeight, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer;
+
+			// F.55 echoes the commanded width and height rather than padding, so the error bitfield
+			// occupies the last byte instead of byte 4 and no byte of this response is reserved.
+			buffer[0] = static_cast<std::uint8_t>(Function::ChangePolygonScaleCommand);
+			buffer[1] = get_low_byte(objectID);
+			buffer[2] = get_high_byte(objectID);
+			buffer[3] = get_low_byte(newWidth);
+			buffer[4] = get_high_byte(newWidth);
+			buffer[5] = get_low_byte(newHeight);
+			buffer[6] = get_high_byte(newHeight);
+			buffer[7] = errorBitfield;
 
 			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
 		}
