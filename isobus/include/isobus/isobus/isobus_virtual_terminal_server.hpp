@@ -907,6 +907,11 @@ namespace isobus
 		/// flagging the status only if either field actually moved (ISO 11783-6 G.2 bytes 3-6)
 		void refresh_active_mask_status_fields();
 
+		/// @brief Returns whether any managed working set has an object pool parse in flight, meaning it has
+		/// started and its response has not yet been queued (ISO 11783-6 G.2 byte 7 bit 4)
+		/// @returns true if a parse is in flight for any managed working set
+		bool is_any_object_pool_parsing() const;
+
 		/// @brief Sends the list of objects that the server supports to a client, usually in
 		/// response to a "get supported objects" message, which is used by a client.
 		/// @param[in] destination The control function to send the message to

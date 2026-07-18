@@ -3540,6 +3540,27 @@ namespace isobus
 		}
 	}
 
+	bool VirtualTerminalServer::is_any_object_pool_parsing() const
+	{
+		bool retVal = false;
+
+		for (const auto &ws : managedWorkingSetList)
+		{
+			const auto processingState = ws->get_object_pool_processing_state();
+
+			// Running is the parse itself; Success and Fail are parsed-but-not-yet-answered, and the
+			// standard holds the bit until the response is queued.
+			if ((VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Running == processingState) ||
+			    (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Success == processingState) ||
+			    (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Fail == processingState))
+			{
+				retVal = true;
+				break;
+			}
+		}
+		return retVal;
+	}
+
 	bool VirtualTerminalServer::send_supported_objects(std::shared_ptr<ControlFunction> destination) const
 	{
 		auto supportedObjects = get_supported_objects();
@@ -3640,6 +3661,19 @@ namespace isobus
 				activeWorkingSetMasterAddress = activeControlFunction->get_address();
 				mark_status_message_changed();
 			}
+		}
+
+		// G.2 byte 7 bit 4 reports that the VT is busy parsing an object pool. It is derived from every
+		// managed working set so a concurrent upload cannot clear it early, and it holds from the start of a
+		// parse until that pool's response is queued. G.2 lists only bytes 2-6 and byte 7 bit 6 as on-change
+		// triggers, so this bit rides the once-per-second cadence rather than forcing a transmission.
+		if (is_any_object_pool_parsing())
+		{
+			busyCodesBitfield |= 0x10;
+		}
+		else
+		{
+			busyCodesBitfield = static_cast<std::uint8_t>(busyCodesBitfield & ~0x10);
 		}
 
 		const bool heartbeatDue = isobus::SystemTiming::time_expired_ms(statusMessageTimestamp_ms, 1000);
