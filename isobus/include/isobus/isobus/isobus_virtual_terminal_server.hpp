@@ -612,6 +612,13 @@ namespace isobus
 		/// @returns true if the message was sent, false otherwise
 		bool send_acknowledgement(AcknowledgementType type, std::uint32_t parameterGroupNumber, std::shared_ptr<InternalControlFunction> source, std::shared_ptr<ControlFunction> destination) const;
 
+		/// @brief Sends a response to a client on the VT to ECU parameter group, unless a macro is executing
+		/// @param[in] buffer The message payload
+		/// @param[in] length The payload length in bytes
+		/// @param[in] destination The control function to send the response to
+		/// @returns true if the response was sent or was deliberately withheld, false if the send failed
+		bool send_response(const std::uint8_t *buffer, std::uint32_t length, std::shared_ptr<ControlFunction> destination) const;
+
 		/// @brief Sends the Unsupported VT Function message in response to a VT function this VT does not support
 		/// @param[in] unsupportedFunctionCode The function code (received Byte 1) that is not supported
 		/// @param[in] destination The control function to send the message to
@@ -963,6 +970,7 @@ namespace isobus
 		std::uint8_t activeWorkingSetMasterAddress = NULL_CAN_ADDRESS; ///< The address of the active working set's master
 		std::uint8_t busyCodesBitfield = 0; ///< The busy codes bitfield
 		std::uint8_t currentCommandFunctionCode = 0; ///< The current command function code being processed
+		std::uint8_t macroExecutionDepth = 0; ///< Non-zero while command messages from a macro are being executed, which withholds their responses (ISO 11783-6 4.6.11.4 f). A depth rather than a flag because a macro command may itself be Execute Macro
 		bool statusMessagePending = true; ///< Set when a VT Status field the standard tracks (ISO 11783-6 G.2 bytes 2-6, or byte 7 bit 6) changes, so update() transmits promptly instead of waiting for the next 1 Hz tick
 		bool auxiliaryInputLearnModeActive = false; ///< Whether the status message reports auxiliary input learn mode (busy-codes bit 0x40)
 		bool initialized = false; ///< True if the server has been initialized, otherwise false
