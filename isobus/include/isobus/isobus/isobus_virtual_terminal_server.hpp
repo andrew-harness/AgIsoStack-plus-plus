@@ -449,6 +449,14 @@ namespace isobus
 			AnyOtherError = 2
 		};
 
+		/// @brief Enumerates the bit indices of the error fields that can be set in a get attribute value response
+		enum class GetAttributeValueErrorBit : std::uint8_t
+		{
+			InvalidObjectID = 0,
+			InvalidAttributeID = 1,
+			AnyOtherError = 4
+		};
+
 		/// @brief Enumerates the bit indices of the error fields that can be set in a hide/show object response
 		enum class HideShowObjectErrorBit : std::uint8_t
 		{
@@ -639,6 +647,18 @@ namespace isobus
 		/// @param[in] destination The control function to send the message to
 		/// @returns true if the message was sent, otherwise false
 		bool send_change_attribute_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::uint8_t attributeID, std::shared_ptr<ControlFunction> destination) const;
+
+		/// @brief Sends a response to a get attribute value message (ISO 11783-6 F.59)
+		/// @details A no-error response carries the object ID in bytes 2-3 and the attribute value little endian
+		/// in bytes 5-8. An error response instead sets bytes 2-3 to 0xFFFF and reports the queried object ID in
+		/// bytes 5-6 alongside the error bitfield in byte 7.
+		/// @param[in] objectID The object ID that was queried
+		/// @param[in] attributeID The attribute ID that was queried
+		/// @param[in] value The current value of the attribute, ignored when errorBitfield is non-zero
+		/// @param[in] errorBitfield An error bitfield, or zero for a no-error response
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false
+		bool send_get_attribute_value_response(std::uint16_t objectID, std::uint8_t attributeID, std::uint32_t value, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends a response to a select colour map command
 		/// @param[in] objectID The object ID of the Colour Map that was selected, or 0xFFFF for the default palette

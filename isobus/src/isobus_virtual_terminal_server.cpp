@@ -1285,6 +1285,35 @@ namespace isobus
 			}
 			break;
 
+			case Function::GetAttributeValueMessage:
+			{
+				auto objectId = get_little_endian_uint16(data, 1);
+				std::uint8_t attributeId = data[3];
+				auto object = managedWorkingSet->get_object_by_id(objectId);
+
+				if (nullptr == object)
+				{
+					send_get_attribute_value_response(objectId, attributeId, 0, get_bit(static_cast<std::uint8_t>(GetAttributeValueErrorBit::InvalidObjectID)), managedWorkingSet->get_control_function());
+					LOG_WARNING("[VT Server]: Client %u get attribute value failed because the object ID %u doesn't exist", managedWorkingSet->get_control_function()->get_address(), objectId);
+				}
+				else
+				{
+					std::uint32_t attributeValue = 0;
+
+					if (object->get_attribute(attributeId, attributeValue))
+					{
+						send_get_attribute_value_response(objectId, attributeId, attributeValue, 0, managedWorkingSet->get_control_function());
+						LOG_DEBUG("[VT Server]: Client %u read attribute %u of object %u as %u", managedWorkingSet->get_control_function()->get_address(), attributeId, objectId, attributeValue);
+					}
+					else
+					{
+						send_get_attribute_value_response(objectId, attributeId, 0, get_bit(static_cast<std::uint8_t>(GetAttributeValueErrorBit::InvalidAttributeID)), managedWorkingSet->get_control_function());
+						LOG_WARNING("[VT Server]: Client %u get attribute value failed because object %u has no attribute %u", managedWorkingSet->get_control_function()->get_address(), objectId, attributeId);
+					}
+				}
+			}
+			break;
+
 			case Function::ChangeStringValueCommand:
 			{
 				auto objectIdToChange = get_little_endian_uint16(data, 1);
@@ -2711,6 +2740,40 @@ namespace isobus
 			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
 		}
 		return retVal;
+	}
+
+	bool VirtualTerminalServer::send_get_attribute_value_response(std::uint16_t objectID, std::uint8_t attributeID, std::uint32_t value, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
+	{
+		std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = { 0 };
+
+		buffer[0] = static_cast<std::uint8_t>(Function::GetAttributeValueMessage);
+
+		if (0 != errorBitfield)
+		{
+			// F.59 error response: bytes 2-3 are 0xFFFF and the queried object ID moves to bytes 5-6
+			buffer[1] = 0xFF;
+			buffer[2] = 0xFF;
+			buffer[3] = attributeID;
+			buffer[4] = get_low_byte(objectID);
+			buffer[5] = get_high_byte(objectID);
+			buffer[6] = errorBitfield;
+			buffer[7] = 0xFF; // Reserved
+		}
+		else
+		{
+			// F.59 no-error response: the attribute value occupies bytes 5-8 little endian. Writing all
+			// four bytes suits every attribute data type, because a client reads only the number of bytes
+			// its attribute's type defines and the LSB is always first.
+			buffer[1] = get_low_byte(objectID);
+			buffer[2] = get_high_byte(objectID);
+			buffer[3] = attributeID;
+			buffer[4] = static_cast<std::uint8_t>(value & 0xFF);
+			buffer[5] = static_cast<std::uint8_t>((value >> 8) & 0xFF);
+			buffer[6] = static_cast<std::uint8_t>((value >> 16) & 0xFF);
+			buffer[7] = static_cast<std::uint8_t>((value >> 24) & 0xFF);
+		}
+
+		return send_response(buffer.data(), CAN_DATA_LENGTH, destination);
 	}
 
 	bool VirtualTerminalServer::send_change_background_colour_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::uint8_t colour, std::shared_ptr<ControlFunction> destination) const
