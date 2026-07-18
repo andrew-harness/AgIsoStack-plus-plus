@@ -1489,7 +1489,7 @@ namespace isobus
 								{
 									LOG_ERROR("[WS]: Picture graphic has RLE but an odd number of data bytes. Object: " + isobus::to_string(static_cast<int>(decodedID)));
 								}
-								else
+								else if (iopLength >= tempObject->get_number_of_bytes_in_raw_data())
 								{
 									// Decode the RLE
 									std::size_t lineAmountLeft = tempObject->get_actual_width();
@@ -1555,6 +1555,10 @@ namespace isobus
 										iopData += 2;
 										iopLength -= 2;
 									}
+								}
+								else
+								{
+									LOG_ERROR("[WS]: Not enough IOP data to deserialize picture graphic's RLE pixel data. Object: " + isobus::to_string(static_cast<int>(decodedID)));
 								}
 							}
 							else
