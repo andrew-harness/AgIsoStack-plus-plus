@@ -2283,6 +2283,41 @@ namespace isobus
 			}
 			break;
 
+			case Function::ChangeEndPointCommand:
+			{
+				auto objectID = get_little_endian_uint16(data, 1);
+				const std::uint16_t newWidth = get_little_endian_uint16(data, 3);
+				const std::uint16_t newHeight = get_little_endian_uint16(data, 5);
+				const std::uint8_t lineDirection = data[7];
+				auto targetObject = managedWorkingSet->get_object_by_id(objectID);
+
+				// This chain validates both the target and the direction before the final branch writes
+				// any attribute, so a rejected command leaves the output line exactly as it was.
+				if ((nullptr == targetObject) || (VirtualTerminalObjectType::OutputLine != targetObject->get_object_type()))
+				{
+					LOG_WARNING("[VT Server]: Client %u change end point: object id %u is not an output line in this pool", managedWorkingSet->get_control_function()->get_address(), objectID);
+					send_change_end_point_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeEndPointErrorBit::InvalidObjectID)), managedWorkingSet->get_control_function());
+				}
+				else if (lineDirection > 1)
+				{
+					LOG_WARNING("[VT Server]: Client %u change end point: line direction %u is not valid for object %u", managedWorkingSet->get_control_function()->get_address(), lineDirection, objectID);
+					send_change_end_point_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeEndPointErrorBit::InvalidLineDirection)), managedWorkingSet->get_control_function());
+				}
+				else
+				{
+					auto line = std::static_pointer_cast<OutputLine>(targetObject);
+
+					line->set_width(newWidth);
+					line->set_height(newHeight);
+					line->set_line_direction(static_cast<OutputLine::LineDirection>(lineDirection));
+					send_change_end_point_response(objectID, 0, managedWorkingSet->get_control_function());
+					onRepaintEventDispatcher.call(managedWorkingSet);
+					process_macro(targetObject, EventID::OnChangeEndpoint, targetObject->get_object_type(), managedWorkingSet);
+					LOG_DEBUG("[VT Server]: Client %u change end point command: Object: %u, Width: %u, Height: %u, Direction: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight, lineDirection);
+				}
+			}
+			break;
+
 			case Function::ControlAudioSignalCommand:
 			{
 				send_audio_signal_successful(message.get_source_control_function());
@@ -3160,6 +3195,28 @@ namespace isobus
 			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer;
 
 			buffer[0] = static_cast<std::uint8_t>(Function::ChangePolygonPointCommand);
+			buffer[1] = get_low_byte(objectID);
+			buffer[2] = get_high_byte(objectID);
+			buffer[3] = errorBitfield;
+			buffer[4] = 0xFF;
+			buffer[5] = 0xFF;
+			buffer[6] = 0xFF;
+			buffer[7] = 0xFF;
+
+			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
+		}
+		return retVal;
+	}
+
+	bool VirtualTerminalServer::send_change_end_point_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer;
+
+			buffer[0] = static_cast<std::uint8_t>(Function::ChangeEndPointCommand);
 			buffer[1] = get_low_byte(objectID);
 			buffer[2] = get_high_byte(objectID);
 			buffer[3] = errorBitfield;
