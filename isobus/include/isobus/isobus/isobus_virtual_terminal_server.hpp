@@ -108,6 +108,15 @@ namespace isobus
 		/// @returns True if the message was sent, otherwise false
 		bool send_load_version_response(std::uint8_t errorCodes, std::shared_ptr<ControlFunction> destination) const;
 
+		/// @brief Sends a response to an extended load version command (command byte 0xD5)
+		/// This is the extended-label counterpart to send_load_version_response, sent after the object
+		/// pool processing thread completes for a pool loaded via an Extended Load Version command. Such
+		/// a client waits on the extended (0xD5) response rather than the standard (0xD1) one.
+		/// @param[in] errorCodes A set of error bits to report to the client. These will be reported from the managed working set's parsing results.
+		/// @param[in] destination The VT client to send the message to
+		/// @returns True if the message was sent, otherwise false
+		bool send_extended_load_version_response(std::uint8_t errorCodes, std::shared_ptr<ControlFunction> destination) const;
+
 		/// @brief Conditionally executes a macro. If the object passed in is of the specified type, and
 		/// a macro is defined for that object, the macro will be executed if the macro event matches the
 		/// event ID of the macro.

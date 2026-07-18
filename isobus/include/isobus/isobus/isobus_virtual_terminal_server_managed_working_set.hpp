@@ -94,6 +94,15 @@ namespace isobus
 		/// @param[in] value True if this pool was loaded via a Load Version Command, otherwise false (transferred normally)
 		void set_was_object_pool_loaded_from_non_volatile_memory(bool value, CANLibBadge<VirtualTerminalServer>);
 
+		/// @brief Tells the server whether the Load Version that fetched this pool was the extended
+		/// (0xD5) variant, so the deferred load-completed response uses the matching command byte.
+		/// @returns True if this pool was loaded via an Extended Load Version Command, otherwise false
+		bool get_loaded_via_extended_version_command() const;
+
+		/// @brief Records whether the Load Version that fetched this pool was the extended (0xD5) variant.
+		/// @param[in] value True if this pool was loaded via an Extended Load Version Command, otherwise false
+		void set_loaded_via_extended_version_command(bool value, CANLibBadge<VirtualTerminalServer>);
+
 		/// @brief Returns the VT version the working set master reported in its Working Set Maintenance
 		/// message (ISO 11783-6 G.3). Values: 3, 4, 5, or 0xFF for version 2 and prior. Defaults to
 		/// 0xFF until a maintenance message is received.
@@ -169,6 +178,7 @@ namespace isobus
 		std::uint16_t focusedObject = NULL_OBJECT_ID; ///< Stores the object ID of the currently focused object
 		std::uint16_t activeColourMapObjectId = NULL_OBJECT_ID; ///< The object ID of the Colour Map selected by the Select Colour Map command (F.60), or NULL_OBJECT_ID for the default palette
 		bool wasLoadedFromNonVolatileMemory = false; ///< Used to tell the server how this object pool was obtained
+		bool loadedViaExtendedVersionCommand = false; ///< True when the pool was loaded via an Extended Load Version command (0xD5), so the deferred load response uses the extended command byte
 		bool workingSetDeletionRequested = false; ///< Used to tell the server to delete this working set
 		std::uint8_t workingSetMaintenanceVersion = 0xFF; ///< The VT version the master reported in Working Set Maintenance (0xFF = version 2 and prior, the conservative default)
 	};

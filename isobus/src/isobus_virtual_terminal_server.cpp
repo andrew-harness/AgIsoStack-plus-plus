@@ -594,6 +594,182 @@ namespace isobus
 			}
 			break;
 
+			case Function::ExtendedStoreVersionCommand:
+			{
+				if (data.size() < static_cast<std::size_t>(EXTENDED_VERSION_LABEL_LENGTH) + 1u)
+				{
+					LOG_WARNING("[VT Server]: Received a malformed Extended Store Version command (too short to contain a 32 byte label)");
+					break;
+				}
+
+				if (managedWorkingSet->get_any_object_pools())
+				{
+					std::ostringstream nameString;
+					nameString << std::hex << std::setfill('0') << std::setw(16) << managedWorkingSet->get_control_function()->get_NAME().get_full_name();
+					std::vector<std::uint8_t> versionLabel;
+					bool allPoolsSaved = true;
+					versionLabel.reserve(EXTENDED_VERSION_LABEL_LENGTH);
+
+					for (std::uint_fast8_t i = 0; i < EXTENDED_VERSION_LABEL_LENGTH; i++)
+					{
+						versionLabel.push_back(data[i + 1]);
+					}
+
+					// The object pool arrives as one or more object-aligned components; concatenate them
+					// into a single stream stored under one key. save_version names the file by the version
+					// label, so saving each component separately would overwrite all but the last, and a
+					// multi-component pool would reload incomplete -- objects referencing the dropped
+					// components then dangle when the loaded pool is activated.
+					std::vector<std::uint8_t> combinedPool;
+					for (std::size_t i = 0; i < managedWorkingSet->get_number_iop_files(); i++)
+					{
+						const std::vector<std::uint8_t> &component = managedWorkingSet->get_iop_raw_data(i);
+						combinedPool.insert(combinedPool.end(), component.begin(), component.end());
+					}
+
+					allPoolsSaved = save_version(combinedPool, versionLabel, message.get_source_control_function()->get_NAME());
+					if (allPoolsSaved)
+					{
+						LOG_INFO("[VT Server]: Object pool for NAME " + nameString.str() + " was stored.");
+					}
+					else
+					{
+						LOG_ERROR("[VT Server]: Object pool for NAME " + nameString.str() + " could not be stored.");
+					}
+
+					std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = { 0 };
+					buffer[0] = static_cast<std::uint8_t>(Function::ExtendedStoreVersionCommand);
+					buffer[1] = 0xFF; // Reserved
+					buffer[2] = 0xFF; // Reserved
+					buffer[3] = 0xFF; // Reserved
+					buffer[4] = 0xFF; // Reserved
+					if (allPoolsSaved)
+					{
+						buffer[5] = 0; // No error
+					}
+					else
+					{
+						buffer[5] = 0x04; // Any other error
+					}
+					buffer[6] = 0xFF; // Reserved
+					buffer[7] = 0xFF; // Reserved
+					CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+					                                               buffer.data(),
+					                                               CAN_DATA_LENGTH,
+					                                               serverInternalControlFunction,
+					                                               message.get_source_control_function(),
+					                                               get_priority());
+				}
+				else
+				{
+					// Whomever this is appears to be behaving badly, send them a NACK
+					send_acknowledgement(AcknowledgementType::Negative, static_cast<std::uint32_t>(CANLibParameterGroupNumber::ECUtoVirtualTerminal), serverInternalControlFunction, managedWorkingSet->get_control_function());
+				}
+			}
+			break;
+
+			case Function::ExtendedDeleteVersionCommand:
+			{
+				if (data.size() < static_cast<std::size_t>(EXTENDED_VERSION_LABEL_LENGTH) + 1u)
+				{
+					LOG_WARNING("[VT Server]: Received a malformed Extended Delete Version command (too short to contain a 32 byte label)");
+					break;
+				}
+
+				std::vector<std::uint8_t> versionLabel;
+				std::ostringstream nameString;
+				nameString << std::hex << std::setfill('0') << std::setw(16) << managedWorkingSet->get_control_function()->get_NAME().get_full_name();
+				versionLabel.reserve(EXTENDED_VERSION_LABEL_LENGTH);
+
+				for (std::uint_fast8_t i = 0; i < EXTENDED_VERSION_LABEL_LENGTH; i++)
+				{
+					versionLabel.push_back(data[i + 1]);
+				}
+
+				bool wasDeleted = delete_version(versionLabel, managedWorkingSet->get_control_function()->get_NAME());
+
+				if (wasDeleted)
+				{
+					LOG_INFO("[VT Server]: Deleted an extended object pool version for client NAME %s", nameString.str().c_str());
+				}
+				else
+				{
+					LOG_WARNING("[VT Server]: Extended delete version failed for client NAME %s", nameString.str().c_str());
+				}
+
+				const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+					static_cast<std::uint8_t>(Function::ExtendedDeleteVersionCommand),
+					0xFF, // Reserved
+					0xFF, // Reserved
+					0xFF, // Reserved
+					0xFF, // Reserved
+					static_cast<std::uint8_t>(wasDeleted ? 0 : get_bit(static_cast<std::uint8_t>(DeleteVersionErrorBit::VersionLabelNotCorrectOrUnknown))),
+					0xFF, // Reserved
+					0xFF // Reserved
+				};
+				CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+				                                               buffer.data(),
+				                                               CAN_DATA_LENGTH,
+				                                               serverInternalControlFunction,
+				                                               message.get_source_control_function(),
+				                                               get_priority());
+			}
+			break;
+
+			case Function::ExtendedLoadVersionCommand:
+			{
+				if (data.size() < static_cast<std::size_t>(EXTENDED_VERSION_LABEL_LENGTH) + 1u)
+				{
+					LOG_WARNING("[VT Server]: Received a malformed Extended Load Version command (too short to contain a 32 byte label)");
+					break;
+				}
+
+				std::vector<std::uint8_t> versionLabel;
+
+				versionLabel.reserve(EXTENDED_VERSION_LABEL_LENGTH);
+
+				for (std::uint_fast8_t i = 0; i < EXTENDED_VERSION_LABEL_LENGTH; i++)
+				{
+					versionLabel.push_back(data[i + 1]);
+				}
+
+				auto loadedVersion = load_version(versionLabel, message.get_source_control_function()->get_NAME());
+				if (!loadedVersion.empty())
+				{
+					managedWorkingSet->set_iop_size(static_cast<std::uint32_t>(loadedVersion.size()));
+					managedWorkingSet->add_iop_raw_data(loadedVersion);
+				}
+				else
+				{
+					const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+						static_cast<std::uint8_t>(Function::ExtendedLoadVersionCommand),
+						0xFF, // Reserved
+						0xFF, // Reserved
+						0xFF, // Reserved
+						0xFF, // Reserved
+						0x01, // Error: the requested version is not available
+						0xFF, // Reserved
+						0xFF // Reserved
+					};
+					CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+					                                               buffer.data(),
+					                                               CAN_DATA_LENGTH,
+					                                               serverInternalControlFunction,
+					                                               message.get_source_control_function(),
+					                                               get_priority());
+					LOG_ERROR("[VT Server]: Failed to load requested extended object pool version");
+				}
+
+				if (managedWorkingSet->get_any_object_pools())
+				{
+					managedWorkingSet->start_parsing_thread();
+					managedWorkingSet->set_was_object_pool_loaded_from_non_volatile_memory(true, {});
+					managedWorkingSet->set_loaded_via_extended_version_command(true, {});
+					LOG_DEBUG("[VT Server]: Starting parsing thread for loaded extended pool data.");
+				}
+			}
+			break;
+
 			case Function::LoadVersionCommand:
 			{
 				std::vector<std::uint8_t> versionLabel;
@@ -641,20 +817,26 @@ namespace isobus
 						versionLabel.push_back(data[i + 1]);
 					}
 
+					// The object pool arrives as one or more object-aligned components; concatenate them
+					// into a single stream stored under one key. save_version names the file by the version
+					// label, so saving each component separately would overwrite all but the last, and a
+					// multi-component pool would reload incomplete -- objects referencing the dropped
+					// components then dangle when the loaded pool is activated.
+					std::vector<std::uint8_t> combinedPool;
 					for (std::size_t i = 0; i < managedWorkingSet->get_number_iop_files(); i++)
 					{
-						bool didSave = save_version(managedWorkingSet->get_iop_raw_data(i), versionLabel, message.get_source_control_function()->get_NAME());
+						const std::vector<std::uint8_t> &component = managedWorkingSet->get_iop_raw_data(i);
+						combinedPool.insert(combinedPool.end(), component.begin(), component.end());
+					}
 
-						if (didSave)
-						{
-							LOG_INFO("[VT Server]: Object pool " + isobus::to_string(i) + " for NAME " + nameString.str() + " was stored.");
-						}
-						else
-						{
-							LOG_ERROR("[VT Server]: Object pool " + isobus::to_string(i) + " for NAME " + nameString.str() + " could not be stored.");
-							allPoolsSaved = false;
-							break;
-						}
+					allPoolsSaved = save_version(combinedPool, versionLabel, message.get_source_control_function()->get_NAME());
+					if (allPoolsSaved)
+					{
+						LOG_INFO("[VT Server]: Object pool for NAME " + nameString.str() + " was stored.");
+					}
+					else
+					{
+						LOG_ERROR("[VT Server]: Object pool for NAME " + nameString.str() + " could not be stored.");
 					}
 
 					std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = { 0 };
@@ -2834,6 +3016,32 @@ namespace isobus
 		return retVal;
 	}
 
+	bool VirtualTerminalServer::send_extended_load_version_response(std::uint8_t errorCodes, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+				static_cast<std::uint8_t>(Function::ExtendedLoadVersionCommand),
+				0xFF, // Reserved
+				0xFF, // Reserved
+				0xFF, // Reserved
+				0xFF, // Reserved
+				errorCodes,
+				0xFF, // Reserved
+				0xFF // Reserved
+			};
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+			                                                        buffer.data(),
+			                                                        CAN_DATA_LENGTH,
+			                                                        serverInternalControlFunction,
+			                                                        destination,
+			                                                        get_priority());
+		}
+		return retVal;
+	}
+
 	void VirtualTerminalServer::process_macro(std::shared_ptr<isobus::VTObject> object, isobus::EventID macroEvent, isobus::VirtualTerminalObjectType targetObjectType, std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingset)
 	{
 		if (nullptr != object && targetObjectType == object->get_object_type())
@@ -3307,8 +3515,17 @@ namespace isobus
 					// A pool loaded via Load Version is completed by a Load Version response, not an
 					// End of Object Pool response -- that is the message the client waits on. Consume
 					// the flag so a later parse on this working set (e.g. a runtime pool update) is
-					// again completed by an End of Object Pool response.
-					send_load_version_response(0, ws->get_control_function());
+					// again completed by an End of Object Pool response. A client that used the
+					// Extended Load Version command (0xD5) waits on the extended response, not 0xD1.
+					if (ws->get_loaded_via_extended_version_command())
+					{
+						send_extended_load_version_response(0, ws->get_control_function());
+						ws->set_loaded_via_extended_version_command(false, {});
+					}
+					else
+					{
+						send_load_version_response(0, ws->get_control_function());
+					}
 					ws->set_was_object_pool_loaded_from_non_volatile_memory(false, {});
 				}
 				else

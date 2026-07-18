@@ -98,6 +98,16 @@ namespace isobus
 		wasLoadedFromNonVolatileMemory = value;
 	}
 
+	bool VirtualTerminalServerManagedWorkingSet::get_loaded_via_extended_version_command() const
+	{
+		return loadedViaExtendedVersionCommand;
+	}
+
+	void VirtualTerminalServerManagedWorkingSet::set_loaded_via_extended_version_command(bool value, CANLibBadge<VirtualTerminalServer>)
+	{
+		loadedViaExtendedVersionCommand = value;
+	}
+
 	std::uint8_t VirtualTerminalServerManagedWorkingSet::get_working_set_maintenance_version() const
 	{
 		return workingSetMaintenanceVersion;
