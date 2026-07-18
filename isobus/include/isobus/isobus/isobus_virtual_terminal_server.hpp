@@ -596,7 +596,8 @@ namespace isobus
 		/// with whom we've established a working set master relationship
 		/// @param[in] message The CAN message being received
 		/// @param[in] managedWorkingSet The working set that is associated to the client sending the message
-		void process_connection_dependent_messages(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+		/// @returns True if the function code was recognised and handled, false if it is unsupported
+		bool process_connection_dependent_messages(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
 
 		/// @brief Processes a CAN message from any VT client
 		/// @param[in] message The CAN message being received
@@ -610,6 +611,12 @@ namespace isobus
 		/// @param[in] destination The destination control function to send the acknowledgement to
 		/// @returns true if the message was sent, false otherwise
 		bool send_acknowledgement(AcknowledgementType type, std::uint32_t parameterGroupNumber, std::shared_ptr<InternalControlFunction> source, std::shared_ptr<ControlFunction> destination) const;
+
+		/// @brief Sends the Unsupported VT Function message in response to a VT function this VT does not support
+		/// @param[in] unsupportedFunctionCode The function code (received Byte 1) that is not supported
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false
+		bool send_unsupported_vt_function(std::uint8_t unsupportedFunctionCode, std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends a response to a change active mask command
 		/// @param[in] newMaskObjectID The object ID for the new active mask

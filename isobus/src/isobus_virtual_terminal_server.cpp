@@ -497,8 +497,9 @@ namespace isobus
 		return retVal;
 	}
 
-	void VirtualTerminalServer::process_connection_dependent_messages(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet)
+	bool VirtualTerminalServer::process_connection_dependent_messages(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet)
 	{
+		bool functionSupported = true;
 		const auto &data = message.get_data();
 		switch (static_cast<Function>(data.at(0)))
 		{
@@ -2255,8 +2256,10 @@ namespace isobus
 			break;
 
 			default:
+				functionSupported = false;
 				break;
 		}
+		return functionSupported;
 	}
 
 	void VirtualTerminalServer::process_rx_message(const CANMessage &message, void *parent)
@@ -2271,21 +2274,28 @@ namespace isobus
 			{
 				bool responseSent = parentServer->process_stateless_messages(message);
 				bool isManaged = parentServer->check_if_source_is_managed(message);
-				if (!isManaged && !responseSent)
-				{
-					// Whomever this is has probably timed out. Send them a NACK
-					LOG_WARNING("[VT Server]: Received a non-status message from a client at address %u, but they are not connected to this VT.", message.get_identifier().get_source_address());
-					parentServer->send_acknowledgement(AcknowledgementType::Negative, static_cast<std::uint32_t>(CANLibParameterGroupNumber::ECUtoVirtualTerminal), parentServer->get_internal_control_function(), message.get_source_control_function());
-				}
+				bool functionSupported = responseSent;
 				if (isManaged)
 				{
 					for (const auto &cf : parentServer->managedWorkingSetList)
 					{
 						if (cf->get_control_function() == message.get_source_control_function())
 						{
-							parentServer->process_connection_dependent_messages(message, cf);
+							functionSupported = parentServer->process_connection_dependent_messages(message, cf) || functionSupported;
 						}
 					}
+					if (!functionSupported)
+					{
+						// A connected working set sent a VT function this VT does not support; reply with the
+						// Unsupported VT Function message echoing the offending function code (ISO 11783-6 F.67).
+						parentServer->send_unsupported_vt_function(message.get_uint8_at(0), message.get_source_control_function());
+					}
+				}
+				else if (!responseSent)
+				{
+					// Whomever this is has probably timed out. Send them a NACK
+					LOG_WARNING("[VT Server]: Received a non-status message from a client at address %u, but they are not connected to this VT.", message.get_identifier().get_source_address());
+					parentServer->send_acknowledgement(AcknowledgementType::Negative, static_cast<std::uint32_t>(CANLibParameterGroupNumber::ECUtoVirtualTerminal), parentServer->get_internal_control_function(), message.get_source_control_function());
 				}
 			}
 		}
@@ -2335,6 +2345,26 @@ namespace isobus
 				0xFF
 			};
 
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+			                                                        buffer.data(),
+			                                                        CAN_DATA_LENGTH,
+			                                                        serverInternalControlFunction,
+			                                                        destination,
+			                                                        get_priority());
+		}
+		return retVal;
+	}
+
+	bool VirtualTerminalServer::send_unsupported_vt_function(std::uint8_t unsupportedFunctionCode, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+		if (nullptr != destination)
+		{
+			const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+				static_cast<std::uint8_t>(Function::UnsupportedVTFunctionMessage),
+				unsupportedFunctionCode,
+				0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+			};
 			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 			                                                        buffer.data(),
 			                                                        CAN_DATA_LENGTH,
