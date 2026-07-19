@@ -127,6 +127,78 @@ namespace isobus
 		return activeWorkingSet;
 	}
 
+	void VirtualTerminalServer::set_operator_selected_working_set(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> workingSet)
+	{
+		operatorSelectedWorkingSet = workingSet;
+
+		// ISO 11783-6 clause 4.6.8 gives the operator the means to select the active working set, so the
+		// choice takes effect at once rather than at the next event that happens to arbitrate. Going
+		// through the arbitration rather than assigning activeWorkingSet directly is what subordinates
+		// the choice to clause 4.6.14: with an alarm raised the screen does not move, and the choice is
+		// remembered for when that alarm clears.
+		apply_active_working_set_arbitration();
+	}
+
+	bool VirtualTerminalServer::active_working_set_candidate_outranks(const ActiveWorkingSetCandidate &candidate,
+	                                                                 const ActiveWorkingSetCandidate &incumbent)
+	{
+		// The tiers, best first. Only the alarm tier has an ordering of its own; every other tier is a
+		// plain preference, so ties in them are refused and the caller's first candidate keeps the
+		// display.
+		enum : std::uint8_t
+		{
+			TIER_ALARM_RAISED = 0,
+			TIER_OPERATOR_SELECTION = 1,
+			TIER_LAST_DATA_MASK = 2,
+			TIER_CURRENTLY_ACTIVE = 3,
+			TIER_ELIGIBLE = 4
+		};
+		auto tier_of = [](const ActiveWorkingSetCandidate &entry) -> std::uint8_t {
+			if (entry.hasAlarmRaised)
+			{
+				return TIER_ALARM_RAISED;
+			}
+			if (entry.isOperatorSelection)
+			{
+				return TIER_OPERATOR_SELECTION;
+			}
+			if (entry.isLastDataMaskHolder)
+			{
+				return TIER_LAST_DATA_MASK;
+			}
+			if (entry.isCurrentlyActive)
+			{
+				return TIER_CURRENTLY_ACTIVE;
+			}
+			return TIER_ELIGIBLE;
+		};
+		const std::uint8_t candidateTier = tier_of(candidate);
+		const std::uint8_t incumbentTier = tier_of(incumbent);
+		bool retVal = false;
+
+		if (candidateTier != incumbentTier)
+		{
+			retVal = (candidateTier < incumbentTier);
+		}
+		else if (TIER_ALARM_RAISED == candidateTier)
+		{
+			// 4.6.14 ranks alarms first by the Alarm Mask's priority attribute and second by
+			// chronological order of activation. The priority attribute encodes High as 0, Medium as 1
+			// and Low as 2, so a NUMERICALLY LOWER value is a HIGHER priority and the winner is the
+			// minimum. Equal priorities go to the lowest activation sequence, which is the alarm raised
+			// first -- "the first of these, as processed by the VT, shall become the active mask".
+			if (candidate.alarmPriority != incumbent.alarmPriority)
+			{
+				retVal = (candidate.alarmPriority < incumbent.alarmPriority);
+			}
+			else
+			{
+				retVal = (candidate.alarmActivationSequence < incumbent.alarmActivationSequence);
+			}
+		}
+		return retVal;
+	}
+
 	VirtualTerminalBase::GraphicMode VirtualTerminalServer::get_graphic_mode() const
 	{
 		return VirtualTerminalBase::GraphicMode::TwoHundredFiftySixColour;
@@ -4121,14 +4193,14 @@ namespace isobus
 
 	std::shared_ptr<VirtualTerminalServerManagedWorkingSet> VirtualTerminalServer::select_active_working_set() const
 	{
-		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> alarmWinner;
-		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> firstEligible;
+		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> winner;
+		ActiveWorkingSetCandidate winningCandidate;
 		auto lastDataMask = lastDataMaskWorkingSet.lock();
-		bool lastDataMaskIsEligible = false;
-		bool activeWorkingSetIsEligible = false;
-		std::uint8_t winningPriority = 0;
-		std::uint32_t winningSequence = 0;
+		auto operatorSelection = operatorSelectedWorkingSet.lock();
 
+		// A working set is eligible only if its active mask resolves, so a pool that is mid-parse, that
+		// failed to parse, or that names no mask cannot take the display. Everything else about who wins
+		// is in active_working_set_candidate_outranks; this loop only scores the state it reads.
 		for (const auto &ws : managedWorkingSetList)
 		{
 			auto maskObject = get_active_mask_object(ws);
@@ -4138,63 +4210,25 @@ namespace isobus
 				continue;
 			}
 
-			if (nullptr == firstEligible)
+			ActiveWorkingSetCandidate candidate;
+			candidate.hasAlarmRaised = (VirtualTerminalObjectType::AlarmMask == maskObject->get_object_type());
+
+			if (candidate.hasAlarmRaised)
 			{
-				firstEligible = ws;
+				candidate.alarmPriority = static_cast<std::uint8_t>(std::static_pointer_cast<AlarmMask>(maskObject)->get_mask_priority());
+				candidate.alarmActivationSequence = ws->get_alarm_activation_sequence();
 			}
+			candidate.isOperatorSelection = (ws == operatorSelection);
+			candidate.isLastDataMaskHolder = (ws == lastDataMask);
+			candidate.isCurrentlyActive = (ws == activeWorkingSet);
 
-			if (ws == lastDataMask)
+			if ((nullptr == winner) || active_working_set_candidate_outranks(candidate, winningCandidate))
 			{
-				lastDataMaskIsEligible = true;
-			}
-
-			if (ws == activeWorkingSet)
-			{
-				activeWorkingSetIsEligible = true;
-			}
-
-			if (VirtualTerminalObjectType::AlarmMask != maskObject->get_object_type())
-			{
-				continue;
-			}
-
-			// 4.6.14 ranks alarms first by the Alarm Mask's priority attribute and second by
-			// chronological order of activation. The priority attribute encodes High as 0, Medium as 1
-			// and Low as 2, so a NUMERICALLY LOWER value is a HIGHER priority and the winner is the
-			// minimum. Equal priorities go to the lowest activation sequence, which is the alarm raised
-			// first -- "the first of these, as processed by the VT, shall become the active mask".
-			const std::uint8_t priority = static_cast<std::uint8_t>(std::static_pointer_cast<AlarmMask>(maskObject)->get_mask_priority());
-			const std::uint32_t sequence = ws->get_alarm_activation_sequence();
-
-			if ((nullptr == alarmWinner) ||
-			    (priority < winningPriority) ||
-			    ((priority == winningPriority) && (sequence < winningSequence)))
-			{
-				alarmWinner = ws;
-				winningPriority = priority;
-				winningSequence = sequence;
+				winner = ws;
+				winningCandidate = candidate;
 			}
 		}
-
-		if (nullptr != alarmWinner)
-		{
-			return alarmWinner;
-		}
-
-		// No alarm is raised anywhere, so Table 4's "alarm to data" fallback applies: the screen returns
-		// to the working set that had the last visible Data Mask. Failing that the current active working
-		// set keeps the screen, and failing that the first working set with a usable pool takes it, which
-		// is what activates the first client to connect.
-		if (lastDataMaskIsEligible)
-		{
-			return lastDataMask;
-		}
-
-		if (activeWorkingSetIsEligible)
-		{
-			return activeWorkingSet;
-		}
-		return firstEligible;
+		return winner;
 	}
 
 	void VirtualTerminalServer::apply_active_working_set_arbitration()

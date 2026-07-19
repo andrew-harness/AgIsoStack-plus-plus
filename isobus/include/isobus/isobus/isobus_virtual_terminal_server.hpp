@@ -50,6 +50,51 @@ namespace isobus
 		/// @returns Pointer to the currently active working set, or nullptr if none is active
 		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> get_active_working_set() const;
 
+		/// @brief Records the operator's choice of active working set, per ISO 11783-6 clause 4.6.8's
+		/// requirement that "the VT shall provide some means to allow the operator to select the Working
+		/// Set that is to be active".
+		/// @details The choice ranks BELOW a raised Alarm Mask: clause 4.6.14 keeps the highest priority
+		/// alarm displayed until its owner changes the active mask, so this decides who is active among
+		/// the working sets that are not showing an alarm. It is held as a weak reference and outlives an
+		/// alarm that temporarily takes the screen, so the display returns to the operator's choice when
+		/// that alarm clears rather than to the working set that last happened to show a Data Mask. A
+		/// choice whose working set is torn down expires on its own and the remaining fallbacks take over.
+		/// Call on the CAN thread, like the rest of the server's state.
+		/// @param[in] workingSet The working set the operator chose, or nullptr to clear the choice
+		void set_operator_selected_working_set(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> workingSet);
+
+		/// @brief One managed working set's standing in the contest for the display, as the pure ranking
+		/// rule below reads it. Every field is a property of that working set at the moment the
+		/// arbitration runs; nothing here needs an object tree or a control function.
+		struct ActiveWorkingSetCandidate
+		{
+			std::uint32_t alarmActivationSequence = 0; ///< When this working set's Alarm Mask was raised, lower being earlier; meaningless unless hasAlarmRaised
+			std::uint8_t alarmPriority = 0; ///< The raised Alarm Mask's priority attribute, which encodes High as 0, so a LOWER value is a HIGHER priority; meaningless unless hasAlarmRaised
+			bool hasAlarmRaised = false; ///< Whether this working set's active mask is an Alarm Mask
+			bool isOperatorSelection = false; ///< Whether the operator selected this working set (clause 4.6.8)
+			bool isLastDataMaskHolder = false; ///< Whether this working set most recently had a Data Mask displayed
+			bool isCurrentlyActive = false; ///< Whether this working set currently owns the display
+		};
+
+		/// @brief The pure ranking rule behind select_active_working_set: does `candidate` deserve the
+		/// display more than `incumbent` does?
+		/// @details Candidates are ordered in tiers, and only within the alarm tier does anything else
+		/// matter. A raised alarm outranks everything, because ISO 11783-6 clause 4.6.14 keeps the
+		/// highest priority alarm displayed "until the owner Working Set changes the active mask" -- so
+		/// neither an operator selection (4.6.8) nor any fallback may suppress one. Among alarms, 4.6.14
+		/// ranks first by the priority attribute (numerically lower is higher priority) and second by
+		/// chronological order of activation. Below the alarm tier comes the operator's selection, which
+		/// 4.6.8 requires the VT to honour; then the working set that last had a Data Mask displayed,
+		/// which is where Table 4's "alarm to data" transition returns the screen; then the incumbent;
+		/// then anything eligible at all, which is what activates the first client to connect. Ties
+		/// outside the alarm tier are refused, so the earliest working set in the caller's iteration
+		/// order keeps the display.
+		/// @param[in] candidate The working set being considered
+		/// @param[in] incumbent The best working set found so far
+		/// @returns true if `candidate` should displace `incumbent`, otherwise false
+		static bool active_working_set_candidate_outranks(const ActiveWorkingSetCandidate &candidate,
+		                                                  const ActiveWorkingSetCandidate &incumbent);
+
 		/// @brief The Button Activation message allows the VT to transmit operator selection of a Button object to the Working
 		/// Set Master
 		/// @param[in] activationCode 0 for released, 1 for "pressed", 2 for "still held", or 3 for "aborted"
@@ -1057,10 +1102,13 @@ namespace isobus
 		/// @returns The active mask object, or an empty shared pointer if it cannot be resolved
 		std::shared_ptr<VTObject> get_active_mask_object(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet) const;
 
-		/// @brief Returns the working set whose mask should be displayed, per ISO 11783-6 4.6.14: the
-		/// working set with an active Alarm Mask of the highest priority, ties broken by the earliest
-		/// activation, or if no working set has an alarm raised, the one that last had a Data Mask
-		/// visible.
+		/// @brief Returns the working set whose mask should be displayed: the working set with an active
+		/// Alarm Mask of the highest priority per ISO 11783-6 4.6.14, ties broken by the earliest
+		/// activation, and with no alarm raised anywhere the working set the operator selected per
+		/// clause 4.6.8, then the one that last had a Data Mask visible.
+		/// @details Every managed working set whose active mask resolves is scored into an
+		/// ActiveWorkingSetCandidate and ranked by active_working_set_candidate_outranks, which is where
+		/// the whole ordering lives; this function only reads the state that fills the score in.
 		/// @returns The working set that should be active, or an empty shared pointer if there is none
 		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> select_active_working_set() const;
 
@@ -1126,6 +1174,7 @@ namespace isobus
 		std::map<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, bool> managedWorkingSetIopLoadStateMap; ///< A map to hold the IOP load state per session
 		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> activeWorkingSet; ///< The active working set
 		std::weak_ptr<VirtualTerminalServerManagedWorkingSet> lastDataMaskWorkingSet; ///< The working set that most recently had a Data Mask displayed, which 4.6.14 falls back to when the last alarm clears
+		std::weak_ptr<VirtualTerminalServerManagedWorkingSet> operatorSelectedWorkingSet; ///< The working set the operator selected (clause 4.6.8), which outranks the fallbacks but never a raised alarm; weak so a torn down selection expires instead of being kept alive
 		std::weak_ptr<VirtualTerminalServerManagedWorkingSet> displayedAlarmWorkingSet; ///< The working set whose Alarm Mask is on screen, so that the Alarm Mask displayed event fires on appearance rather than on every arbitration
 		std::uint32_t alarmActivationSequenceCounter = 0; ///< Monotonic source of the activation sequence numbers that order equal-priority alarms (4.6.14)
 		std::uint32_t statusMessageTimestamp_ms = 0; ///< The timestamp of the last status message sent
