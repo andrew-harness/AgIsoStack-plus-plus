@@ -37,6 +37,11 @@ namespace isobus
 		const std::map<std::uint16_t, std::shared_ptr<VTObject>> &get_object_tree() const;
 
 		/// @brief Returns a VT object from the object tree by object ID
+		/// @details The lookup does not modify the object tree: an ID that is absent, that is
+		/// NULL_OBJECT_ID, or whose entry holds a null pointer yields an empty shared pointer and
+		/// leaves the tree untouched. That matters because object IDs reach here straight off the
+		/// bus in the VT server's command handlers, and because the pool parser inserts into the
+		/// same tree from its own thread.
 		/// @param[in] objectID The object ID to retrieve from the object tree
 		/// @returns A VT object from the object tree by object ID, or an empty shared pointer if not found
 		std::shared_ptr<VTObject> get_object_by_id(std::uint16_t objectID);

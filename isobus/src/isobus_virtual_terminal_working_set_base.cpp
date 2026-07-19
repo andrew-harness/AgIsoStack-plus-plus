@@ -2455,7 +2455,7 @@ namespace isobus
 
 	std::shared_ptr<VTObject> VirtualTerminalWorkingSetBase::get_object_by_id(std::uint16_t objectID)
 	{
-		return vtObjectTree[objectID];
+		return VTObject::get_object_by_id(objectID, vtObjectTree);
 	}
 
 	std::shared_ptr<VTObject> VirtualTerminalWorkingSetBase::get_working_set_object()
