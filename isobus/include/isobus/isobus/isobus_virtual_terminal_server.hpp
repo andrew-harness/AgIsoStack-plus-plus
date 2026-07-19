@@ -17,6 +17,8 @@
 #include "isobus/isobus/isobus_virtual_terminal_server_managed_working_set.hpp"
 #include "isobus/utility/event_dispatcher.hpp"
 
+#include <array>
+
 namespace isobus
 {
 	/// @brief This class is an abstract VT server interface.
@@ -1185,6 +1187,11 @@ namespace isobus
 		std::uint8_t busyCodesBitfield = 0; ///< The busy codes bitfield
 		std::uint8_t currentCommandFunctionCode = 0; ///< The current command function code being processed
 		std::uint8_t macroExecutionDepth = 0; ///< Non-zero while command messages from a macro are being executed, which withholds their responses (ISO 11783-6 4.6.11.4 f). A depth rather than a flag because a macro command may itself be Execute Macro
+		static constexpr std::uint8_t MAX_MACRO_EXECUTION_DEPTH = 16; ///< How deeply macros may nest before the VT refuses to go further. ISO 11783-6 sets no nesting ceiling, so this bound is the VT's own: 4.6.11.4 forbids circular references but places that obligation on the object pool, and a pool with a circular or pathologically long macro chain would otherwise exhaust the stack
+		std::array<std::uint16_t, MAX_MACRO_EXECUTION_DEPTH> activeMacroIDs = {}; ///< The object IDs of the macros currently executing, one per nesting level, indexed by macroExecutionDepth. Entries [0, macroExecutionDepth) are the active chain, which is what makes a circular reference detectable
+		static constexpr std::uint32_t MAX_MACRO_EXECUTIONS_PER_COMMAND = 1000; ///< How many macro executions one bus command may trigger in total, across every nesting level, before the VT abandons the rest. This bounds the WORK a pool can demand, which the depth ceiling does not: a fan-out of macros can be exponentially wide while staying shallow and acyclic. The standard sets no such number; this bound is the VT's own, sized so a worst-case trigger blocks the CAN thread for well under the 3 s working set maintenance timeout
+		std::uint32_t macroExecutionsThisCommand = 0; ///< Macro executions attributed to the bus command currently being processed
+		bool macroExecutionBudgetExhausted = false; ///< Latched when the budget is spent, so abandoning the rest of the macros is logged once rather than once per remaining macro
 		bool statusMessagePending = true; ///< Set when a VT Status field the standard tracks (ISO 11783-6 G.2 bytes 2-6, or byte 7 bit 6) changes, so update() transmits promptly instead of waiting for the next 1 Hz tick
 		bool auxiliaryInputLearnModeActive = false; ///< Whether the status message reports auxiliary input learn mode (busy-codes bit 0x40)
 		bool initialized = false; ///< True if the server has been initialized, otherwise false

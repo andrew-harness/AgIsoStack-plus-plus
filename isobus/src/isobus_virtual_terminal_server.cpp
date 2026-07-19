@@ -339,13 +339,52 @@ namespace isobus
 
 			if (macro->get_are_command_packets_valid())
 			{
+				// A macro command may itself be Execute Macro, so this macro can already be somewhere in
+				// the chain that led here. Running it again would re-enter here forever.
+				for (std::uint8_t i = 0; i < macroExecutionDepth; i++)
+				{
+					if (activeMacroIDs[i] == objectIDOfMacro)
+					{
+						LOG_ERROR("[VT Server]: Refusing to execute macro %u: circular macro reference, the macro is already executing. ISO 11783-6 4.6.11.4 does not permit circular references in an object pool.", objectIDOfMacro);
+						return retVal;
+					}
+				}
+
+				// An acyclic chain of macros can still be longer than the VT can afford to nest.
+				if (macroExecutionDepth >= MAX_MACRO_EXECUTION_DEPTH)
+				{
+					LOG_ERROR("[VT Server]: Refusing to execute macro %u: macro nesting depth limit of %u reached.", objectIDOfMacro, static_cast<std::uint16_t>(MAX_MACRO_EXECUTION_DEPTH));
+					return retVal;
+				}
+
+				// Once the budget is spent the rest of this bus command's macros are abandoned silently,
+				// so a wide tree logs one line rather than one per macro it declines to run. Refusing here
+				// also prunes the traversal: the command loop below never runs, so the subtree beneath a
+				// refused macro is never expanded.
+				if (macroExecutionBudgetExhausted)
+				{
+					return retVal;
+				}
+
+				// Neither the cycle check nor the depth ceiling bounds total work: a macro pool can fan out
+				// so that every root-to-leaf path is short and acyclic while the number of executions grows
+				// exponentially with depth.
+				if (macroExecutionsThisCommand >= MAX_MACRO_EXECUTIONS_PER_COMMAND)
+				{
+					macroExecutionBudgetExhausted = true;
+					LOG_ERROR("[VT Server]: Refusing to execute macro %u: macro execution budget of %u executions for one command is spent. Abandoning the remaining macros.", objectIDOfMacro, static_cast<unsigned int>(MAX_MACRO_EXECUTIONS_PER_COMMAND));
+					return retVal;
+				}
+
 				LOG_DEBUG("[VT Server]: Executing macro %u", macro->get_id());
 				retVal = true;
 
 				// 4.6.11.4 f): the commands a macro contains execute, but the VT sends no response on the
 				// bus for any of them. A depth rather than a flag, because a macro command may itself be
 				// Execute Macro, which re-enters here.
+				activeMacroIDs[macroExecutionDepth] = objectIDOfMacro;
 				macroExecutionDepth++;
+				macroExecutionsThisCommand++;
 
 				for (std::uint8_t j = 0; j < macro->get_number_of_commands(); j++)
 				{
@@ -2772,6 +2811,16 @@ namespace isobus
 		    ((CAN_DATA_LENGTH <= message.get_data_length()) ||
 		     ((message.get_data_length() > 5) && (static_cast<std::uint8_t>(Function::ChangeStringValueCommand) == message.get_uint8_at(0))))) // Technically this message can be 6 bytes
 		{
+			// The macro execution budget is per BUS command, and the depth is what makes it so:
+			// execute_macro increments macroExecutionDepth before injecting a macro's command packets,
+			// so every macro-injected message re-enters here with a non-zero depth and does not reset.
+			// Only a message that actually arrived from the bus is at depth zero.
+			if (0 == parentServer->macroExecutionDepth)
+			{
+				parentServer->macroExecutionsThisCommand = 0;
+				parentServer->macroExecutionBudgetExhausted = false;
+			}
+
 			if (static_cast<std::uint32_t>(CANLibParameterGroupNumber::ECUtoVirtualTerminal) == message.get_identifier().get_parameter_group_number())
 			{
 				bool responseSent = parentServer->process_stateless_messages(message);
