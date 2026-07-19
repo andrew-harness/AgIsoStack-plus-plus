@@ -150,6 +150,16 @@ namespace isobus
 		maskLockTimestamp_ms = timestamp_ms;
 	}
 
+	std::uint32_t VirtualTerminalServerManagedWorkingSet::get_alarm_activation_sequence() const
+	{
+		return alarmActivationSequence;
+	}
+
+	void VirtualTerminalServerManagedWorkingSet::set_alarm_activation_sequence(std::uint32_t value, CANLibBadge<VirtualTerminalServer>)
+	{
+		alarmActivationSequence = value;
+	}
+
 	void VirtualTerminalServerManagedWorkingSet::set_object_focus(std::uint16_t objectID)
 	{
 		focusedObject = objectID;

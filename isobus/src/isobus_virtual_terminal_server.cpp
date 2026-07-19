@@ -197,6 +197,11 @@ namespace isobus
 		return onFocusObjectEventDispatcher;
 	}
 
+	EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t> &VirtualTerminalServer::get_on_alarm_mask_displayed_event_dispatcher()
+	{
+		return onAlarmMaskDisplayedEventDispatcher;
+	}
+
 	LanguageCommandInterface &VirtualTerminalServer::get_language_command_interface()
 	{
 		return languageCommandInterface;
@@ -1249,12 +1254,11 @@ namespace isobus
 						}
 						send_change_active_mask_response(newActiveMaskObjectId, 0, managedWorkingSet->get_control_function());
 
-						if (activeWorkingSet == managedWorkingSet)
-						{
-							// The status reports the ACTIVE working set's visible mask (G.2 bytes 3-6), so a runtime mask
-							// change refreshes both it and the soft key mask that mask carries.
-							refresh_active_mask_status_fields();
-						}
+						// A mask change can move the screen between working sets under the priority rules of
+						// 4.6.14, so which working set is displayed is recomputed rather than left with whoever
+						// held it. The arbitration also refreshes the status' visible-mask fields (G.2 bytes
+						// 3-6), which report the ACTIVE working set's mask and the soft key mask it carries.
+						apply_active_working_set_arbitration();
 						onChangeActiveMaskEventDispatcher.call(managedWorkingSet, workingSetObjectId, newActiveMaskObjectId);
 						LOG_DEBUG("[VT Server]: Client %u changed active mask to object %u for working set object %u", managedWorkingSet->get_control_function()->get_address(), newActiveMaskObjectId, workingSetObjectId);
 					}
@@ -1568,12 +1572,14 @@ namespace isobus
 						send_change_attribute_response(objectID, 0, data.at(3), message.get_source_control_function());
 						LOG_DEBUG("[VT Server]: Client %u changed object %u attribute %u to %u", managedWorkingSet->get_control_function()->get_address(), objectID, attributeID, attributeData);
 
-						if (activeWorkingSet == managedWorkingSet)
-						{
-							// Change Attribute reaches the same state the dedicated commands do: attribute 3 on a Working Set
-							// retargets the active mask, and attribute 2 on a Data or Alarm Mask retargets its soft key mask.
-							refresh_active_mask_status_fields();
-						}
+						// Change Attribute reaches the same state the dedicated commands do, including both keys
+						// 4.6.14 ranks alarms by: attribute 3 on a Working Set retargets the active mask, exactly as
+						// Change Active Mask does, and attribute 3 on an Alarm Mask sets its priority, exactly as
+						// Change Priority does. Arbitrating here is what stamps the activation sequence at the moment
+						// an alarm is raised this way, and what lets an alarm raised by a non-active working set take
+						// the screen and sound. Arbitration subsumes the status refresh, and is idempotent when the
+						// attribute changed nothing the screen depends on.
+						apply_active_working_set_arbitration();
 						dispatch_repaint(managedWorkingSet);
 						process_macro(targetObject, EventID::OnChangeAttribute, targetObject->get_object_type(), managedWorkingSet);
 					}
@@ -1956,9 +1962,14 @@ namespace isobus
 					{
 						if (newPriority <= static_cast<std::uint8_t>(AlarmMaskPriority::Low))
 						{
+							std::static_pointer_cast<AlarmMask>(targetObject)->set_mask_priority(static_cast<AlarmMask::Priority>(newPriority));
 							send_change_priority_response(objectID, 0, newPriority, message.get_source_control_function());
 							LOG_DEBUG("[VT Server]: Client %u change priority command: New Priority %u", managedWorkingSet->get_control_function()->get_address(), newPriority);
 							process_macro(targetObject, EventID::OnChangePriority, VirtualTerminalObjectType::AlarmMask, managedWorkingSet);
+
+							// The priority attribute is the first key 4.6.14 ranks alarms by, so changing it can
+							// reorder which working set's alarm belongs on screen.
+							apply_active_working_set_arbitration();
 						}
 						else
 						{
@@ -3969,15 +3980,6 @@ namespace isobus
 		return retVal;
 	}
 
-	void VirtualTerminalServer::set_active_mask_status_fields(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet, std::uint16_t maskObjectId)
-	{
-		// The status' visible-mask fields (ISO 11783-6 G.2 bytes 3-6) report the mask the active
-		// working set shows and the soft key mask that mask carries.
-		activeWorkingSetDataMaskObjectID = maskObjectId;
-		activeWorkingSetSoftkeyMaskObjectID = get_visible_soft_key_mask(workingSet, maskObjectId);
-		mark_status_message_changed();
-	}
-
 	void VirtualTerminalServer::refresh_active_mask_status_fields()
 	{
 		if (nullptr == activeWorkingSet)
@@ -4025,42 +4027,250 @@ namespace isobus
 		return retVal;
 	}
 
+	std::shared_ptr<VTObject> VirtualTerminalServer::get_active_mask_object(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet) const
+	{
+		std::shared_ptr<VTObject> retVal;
+
+		// This reads working sets other than the one being served, so it must not touch their object
+		// trees through get_object_by_id: that is std::map::operator[], which default-inserts on a
+		// miss. Inserting here would both pollute another client's tree with a phantom entry and race
+		// its pool-parsing worker thread, which writes the same map. Look up through the const tree
+		// instead, and report no mask for a working set whose pool is still being parsed -- a half-built
+		// tree cannot meaningfully answer and is being written from another thread. A pool whose parse
+		// failed reports no mask either: it is not valid to display, and until the client re-uploads or
+		// the working set is torn down it must not take the screen.
+		const auto processingState = (nullptr != workingSet) ?
+		  workingSet->get_object_pool_processing_state() :
+		  VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Running;
+
+		if ((VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Running != processingState) &&
+		    (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Fail != processingState))
+		{
+			const auto &objectTree = workingSet->get_object_tree();
+			auto workingSetEntry = objectTree.find(workingSet->get_working_set_object_id());
+
+			if ((objectTree.end() != workingSetEntry) && (nullptr != workingSetEntry->second))
+			{
+				auto maskEntry = objectTree.find(std::static_pointer_cast<WorkingSet>(workingSetEntry->second)->get_active_mask());
+
+				if ((objectTree.end() != maskEntry) && (nullptr != maskEntry->second))
+				{
+					retVal = maskEntry->second;
+				}
+			}
+		}
+		return retVal;
+	}
+
 	bool VirtualTerminalServer::is_any_alarm_mask_active() const
 	{
 		bool retVal = false;
 
 		for (const auto &ws : managedWorkingSetList)
 		{
-			// This reads working sets other than the one being served, so it must not touch their object
-			// trees through get_object_by_id: that is std::map::operator[], which default-inserts on a
-			// miss. Inserting here would both pollute another client's tree with a phantom entry and race
-			// its pool-parsing worker thread, which writes the same map. Look up through the const tree
-			// instead, and skip a working set whose pool is still being parsed -- a half-built tree cannot
-			// meaningfully report an active alarm mask and is being written from another thread.
-			if (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Running == ws->get_object_pool_processing_state())
-			{
-				continue;
-			}
+			auto maskObject = get_active_mask_object(ws);
 
-			const auto &objectTree = ws->get_object_tree();
-			auto workingSetEntry = objectTree.find(ws->get_working_set_object_id());
-
-			if ((objectTree.end() == workingSetEntry) || (nullptr == workingSetEntry->second))
-			{
-				continue;
-			}
-
-			auto maskEntry = objectTree.find(std::static_pointer_cast<WorkingSet>(workingSetEntry->second)->get_active_mask());
-
-			if ((objectTree.end() != maskEntry) &&
-			    (nullptr != maskEntry->second) &&
-			    (VirtualTerminalObjectType::AlarmMask == maskEntry->second->get_object_type()))
+			if ((nullptr != maskObject) &&
+			    (VirtualTerminalObjectType::AlarmMask == maskObject->get_object_type()))
 			{
 				retVal = true;
 				break;
 			}
 		}
 		return retVal;
+	}
+
+	void VirtualTerminalServer::stamp_alarm_activation_sequences()
+	{
+		// ISO 11783-6 4.6.14 breaks a priority tie by "chronological order of activation", so the
+		// sequence is stamped when a working set's active mask TRANSITIONS INTO being an Alarm Mask,
+		// which a sequence of zero identifies, and is cleared when the mask is no longer an Alarm Mask.
+		// Re-stamping a working set that already has an alarm asserted would make it lose the tie-break
+		// to every later alarm even though it raised its own first. A working set whose mask cannot be
+		// resolved keeps whatever it had, because its tree is mid-parse and says nothing about its alarm.
+		for (const auto &ws : managedWorkingSetList)
+		{
+			auto maskObject = get_active_mask_object(ws);
+
+			if (nullptr == maskObject)
+			{
+				continue;
+			}
+
+			if (VirtualTerminalObjectType::AlarmMask == maskObject->get_object_type())
+			{
+				if (0 == ws->get_alarm_activation_sequence())
+				{
+					// Zero is the "no alarm asserted" sentinel, so the counter skips it on wrap rather
+					// than handing out a value that reads as unstamped and loses every tie-break.
+					++alarmActivationSequenceCounter;
+
+					if (0 == alarmActivationSequenceCounter)
+					{
+						++alarmActivationSequenceCounter;
+					}
+					ws->set_alarm_activation_sequence(alarmActivationSequenceCounter, {});
+				}
+			}
+			else
+			{
+				ws->set_alarm_activation_sequence(0, {});
+			}
+		}
+	}
+
+	std::shared_ptr<VirtualTerminalServerManagedWorkingSet> VirtualTerminalServer::select_active_working_set() const
+	{
+		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> alarmWinner;
+		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> firstEligible;
+		auto lastDataMask = lastDataMaskWorkingSet.lock();
+		bool lastDataMaskIsEligible = false;
+		bool activeWorkingSetIsEligible = false;
+		std::uint8_t winningPriority = 0;
+		std::uint32_t winningSequence = 0;
+
+		for (const auto &ws : managedWorkingSetList)
+		{
+			auto maskObject = get_active_mask_object(ws);
+
+			if (nullptr == maskObject)
+			{
+				continue;
+			}
+
+			if (nullptr == firstEligible)
+			{
+				firstEligible = ws;
+			}
+
+			if (ws == lastDataMask)
+			{
+				lastDataMaskIsEligible = true;
+			}
+
+			if (ws == activeWorkingSet)
+			{
+				activeWorkingSetIsEligible = true;
+			}
+
+			if (VirtualTerminalObjectType::AlarmMask != maskObject->get_object_type())
+			{
+				continue;
+			}
+
+			// 4.6.14 ranks alarms first by the Alarm Mask's priority attribute and second by
+			// chronological order of activation. The priority attribute encodes High as 0, Medium as 1
+			// and Low as 2, so a NUMERICALLY LOWER value is a HIGHER priority and the winner is the
+			// minimum. Equal priorities go to the lowest activation sequence, which is the alarm raised
+			// first -- "the first of these, as processed by the VT, shall become the active mask".
+			const std::uint8_t priority = static_cast<std::uint8_t>(std::static_pointer_cast<AlarmMask>(maskObject)->get_mask_priority());
+			const std::uint32_t sequence = ws->get_alarm_activation_sequence();
+
+			if ((nullptr == alarmWinner) ||
+			    (priority < winningPriority) ||
+			    ((priority == winningPriority) && (sequence < winningSequence)))
+			{
+				alarmWinner = ws;
+				winningPriority = priority;
+				winningSequence = sequence;
+			}
+		}
+
+		if (nullptr != alarmWinner)
+		{
+			return alarmWinner;
+		}
+
+		// No alarm is raised anywhere, so Table 4's "alarm to data" fallback applies: the screen returns
+		// to the working set that had the last visible Data Mask. Failing that the current active working
+		// set keeps the screen, and failing that the first working set with a usable pool takes it, which
+		// is what activates the first client to connect.
+		if (lastDataMaskIsEligible)
+		{
+			return lastDataMask;
+		}
+
+		if (activeWorkingSetIsEligible)
+		{
+			return activeWorkingSet;
+		}
+		return firstEligible;
+	}
+
+	void VirtualTerminalServer::apply_active_working_set_arbitration()
+	{
+		// An incumbent is never deselected merely because its object tree is momentarily unreadable.
+		// A runtime object pool update leaves the working set Running for the length of the parse, and
+		// during that window it reports no active mask, so every eligibility test below would reject
+		// it -- including the fallbacks that exist to keep it. Deselecting here would hand the screen
+		// to another working set permanently, because the tail of this function then records that one
+		// as the last Data Mask holder. The parse-completion path re-arbitrates, and a working set
+		// left in Fail is torn down within the same update() call, so this holds for at most one pass.
+		if (nullptr != activeWorkingSet)
+		{
+			const auto activeState = activeWorkingSet->get_object_pool_processing_state();
+
+			if ((VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Running == activeState) ||
+			    (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Fail == activeState))
+			{
+				return;
+			}
+		}
+		stamp_alarm_activation_sequences();
+
+		auto selectedWorkingSet = select_active_working_set();
+
+		if (selectedWorkingSet != activeWorkingSet)
+		{
+			activeWorkingSet = selectedWorkingSet;
+			activeWorkingSetMasterAddress = ((nullptr != selectedWorkingSet) && (nullptr != selectedWorkingSet->get_control_function())) ?
+			  selectedWorkingSet->get_control_function()->get_address() :
+			  isobus::NULL_CAN_ADDRESS;
+
+			if (nullptr == selectedWorkingSet)
+			{
+				activeWorkingSetDataMaskObjectID = NULL_OBJECT_ID;
+				activeWorkingSetSoftkeyMaskObjectID = NULL_OBJECT_ID;
+			}
+			mark_status_message_changed();
+
+			if (nullptr != selectedWorkingSet)
+			{
+				dispatch_repaint(selectedWorkingSet);
+			}
+		}
+		refresh_active_mask_status_fields();
+
+		// 4.6.14 c) sounds the acoustic signal when a mask change causes an Alarm Mask to appear or
+		// reappear, so the event is raised on the transition onto the screen and not while the same
+		// Alarm Mask of the same working set simply stays there. Both the working set and the mask ID
+		// are compared: two working sets can carry Alarm Masks that share an object ID.
+		auto displayedMask = get_active_mask_object(activeWorkingSet);
+		const bool alarmIsDisplayed = (nullptr != displayedMask) &&
+		  (VirtualTerminalObjectType::AlarmMask == displayedMask->get_object_type());
+
+		if (alarmIsDisplayed)
+		{
+			const std::uint16_t alarmMaskObjectID = displayedMask->get_id();
+
+			if ((displayedAlarmWorkingSet.lock() != activeWorkingSet) ||
+			    (displayedAlarmMaskObjectID != alarmMaskObjectID))
+			{
+				displayedAlarmWorkingSet = activeWorkingSet;
+				displayedAlarmMaskObjectID = alarmMaskObjectID;
+				onAlarmMaskDisplayedEventDispatcher.call(activeWorkingSet, alarmMaskObjectID);
+			}
+		}
+		else
+		{
+			displayedAlarmWorkingSet.reset();
+			displayedAlarmMaskObjectID = NULL_OBJECT_ID;
+
+			if (nullptr != displayedMask)
+			{
+				lastDataMaskWorkingSet = activeWorkingSet;
+			}
+		}
 	}
 
 	void VirtualTerminalServer::dispatch_repaint(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet)
@@ -4228,17 +4438,15 @@ namespace isobus
 				{
 					send_end_of_object_pool_response(true, NULL_OBJECT_ID, NULL_OBJECT_ID, 0, ws->get_control_function());
 				}
-				if (isobus::NULL_CAN_ADDRESS == activeWorkingSetMasterAddress)
-				{
-					activeWorkingSet = ws;
-					activeWorkingSetMasterAddress = ws->get_control_function()->get_address();
-					set_active_mask_status_fields(ws, std::static_pointer_cast<WorkingSet>(ws->get_working_set_object())->get_active_mask());
-				}
-				else if (ws == activeWorkingSet)
-				{
-					// A runtime object pool update can retarget the active mask or its soft key mask.
-					refresh_active_mask_status_fields();
-				}
+				// A newly parsed pool joins the arbitration of ISO 11783-6 4.6.14 rather than being adopted
+				// only when no working set is active. A pool whose initial active mask is an Alarm Mask has
+				// an alarm raised the instant it activates, and 4.6.14 gives the screen to the highest
+				// priority alarm regardless of which working set connected first. The arbitration also
+				// covers the two cases the plain adopt used to handle: with no alarms anywhere the first
+				// working set to present a usable pool takes the screen and keeps it, and a runtime object
+				// pool update on the active working set refreshes the status' visible-mask fields, which
+				// that update can retarget.
+				apply_active_working_set_arbitration();
 			}
 			else if (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Fail == ws->get_object_pool_processing_state())
 			{
@@ -4288,6 +4496,8 @@ namespace isobus
 		// the backend once that exists; no audio/UI dependency is added.
 		// Out of scope here: NACK-until-reinitialise (re-initialisation happens naturally once the
 		// working set is gone) and auxiliary-assignment removal (AUX-N is unimplemented).
+		bool workingSetWasTornDown = false;
+
 		for (auto workingSetIterator = managedWorkingSetList.begin(); managedWorkingSetList.end() != workingSetIterator;)
 		{
 			const auto &ws = *workingSetIterator;
@@ -4334,11 +4544,22 @@ namespace isobus
 				}
 
 				workingSetIterator = managedWorkingSetList.erase(workingSetIterator);
+				workingSetWasTornDown = true;
 			}
 			else
 			{
 				++workingSetIterator;
 			}
+		}
+
+		// The screen is not left blank because the working set holding it went away. Once the departed
+		// working sets are out of the list, 4.6.14 is re-run over the survivors, which promotes the next
+		// highest priority alarm or, with no alarm anywhere, the working set that last had a Data Mask
+		// visible. This runs after the erase loop so the arbitration cannot select a working set that is
+		// on its way out.
+		if (workingSetWasTornDown)
+		{
+			apply_active_working_set_arbitration();
 		}
 	}
 }

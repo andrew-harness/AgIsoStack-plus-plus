@@ -320,6 +320,15 @@ namespace isobus
 		/// @returns The event dispatcher for when an object is focused
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t, bool> &get_on_focus_object_event_dispatcher();
 
+		/// @brief Returns the event dispatcher raised each time an Alarm Mask becomes the mask the VT
+		/// displays, carrying the working set that owns it and that Alarm Mask's object ID.
+		/// ISO 11783-6 clause 4.6.14 c) ties the acoustic signal to a mask change that causes an Alarm
+		/// Mask to appear or reappear, which covers a working set activating with an Alarm Mask as its
+		/// initial mask, a runtime Change Active Mask, and a priority arbitration that hands the screen
+		/// to another working set's alarm. An Alarm Mask that simply stays displayed does not raise it.
+		/// @returns The event dispatcher for an Alarm Mask becoming the displayed mask
+		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t> &get_on_alarm_mask_displayed_event_dispatcher();
+
 		//----------------- Other Server Settings -----------------------------
 
 		/// @brief Returns the language command interface for the server, which
@@ -1024,11 +1033,6 @@ namespace isobus
 		/// @returns The object ID of the mask's soft key mask, or NULL_OBJECT_ID if it has none
 		std::uint16_t get_visible_soft_key_mask(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet, std::uint16_t maskObjectId) const;
 
-		/// @brief Points the VT Status' visible-mask fields at the specified mask and its soft key mask
-		/// @param[in] workingSet The working set that owns the mask object
-		/// @param[in] maskObjectId The object ID of the Data Mask or Alarm Mask that is now visible
-		void set_active_mask_status_fields(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet, std::uint16_t maskObjectId);
-
 		/// @brief Recomputes the VT Status' visible-mask fields from the active working set's current state,
 		/// flagging the status only if either field actually moved (ISO 11783-6 G.2 bytes 3-6)
 		void refresh_active_mask_status_fields();
@@ -1041,6 +1045,34 @@ namespace isobus
 		/// @brief Returns whether the mask any managed working set currently shows is an Alarm Mask
 		/// @returns true if an Alarm Mask is the active mask of any managed working set
 		bool is_any_alarm_mask_active() const;
+
+		/// @brief Returns the mask object a working set currently has active.
+		/// @details This is safe to call for a working set other than the one being served. It looks the
+		/// mask up through the const object tree rather than get_object_by_id, which is
+		/// std::map::operator[] and default-inserts on a miss: inserting here would both pollute another
+		/// client's tree with a phantom entry and race the worker thread parsing that client's pool. A
+		/// working set whose pool is still being parsed reports no mask for the same reason -- a
+		/// half-built tree cannot meaningfully answer, and it is being written from another thread.
+		/// @param[in] workingSet The working set to inspect
+		/// @returns The active mask object, or an empty shared pointer if it cannot be resolved
+		std::shared_ptr<VTObject> get_active_mask_object(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet) const;
+
+		/// @brief Returns the working set whose mask should be displayed, per ISO 11783-6 4.6.14: the
+		/// working set with an active Alarm Mask of the highest priority, ties broken by the earliest
+		/// activation, or if no working set has an alarm raised, the one that last had a Data Mask
+		/// visible.
+		/// @returns The working set that should be active, or an empty shared pointer if there is none
+		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> select_active_working_set() const;
+
+		/// @brief Stamps an activation sequence number on each working set whose active mask has become
+		/// an Alarm Mask, and clears it on each whose active mask is no longer one, so that
+		/// select_active_working_set can order equal-priority alarms by when they were raised.
+		void stamp_alarm_activation_sequences();
+
+		/// @brief Recomputes which working set the VT displays (ISO 11783-6 clause 4.6.14) and switches
+		/// to it when it differs from the current one, then raises the Alarm Mask displayed event if the
+		/// resulting mask is an Alarm Mask that was not already on screen.
+		void apply_active_working_set_arbitration();
 
 		/// @brief Raises the repaint event for a working set unless that working set has its visible mask
 		/// locked, in which case the on screen presentation is held until the lock is released.
@@ -1087,12 +1119,17 @@ namespace isobus
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t, std::uint16_t> onChangeActiveMaskEventDispatcher; ///< Event dispatcher for active data/alarm mask change events
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t, std::uint16_t> onChangeActiveSoftKeyMaskEventDispatcher; ///< Event dispatcher for active softkey mask change events
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t, bool> onFocusObjectEventDispatcher; ///< Event dispatcher for focus object events
+		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t> onAlarmMaskDisplayedEventDispatcher; ///< Event dispatcher for an Alarm Mask appearing or reappearing as the displayed mask (ISO 11783-6 4.6.14 c)
 		LanguageCommandInterface languageCommandInterface; ///< The language command interface for the server
 		std::shared_ptr<InternalControlFunction> serverInternalControlFunction; ///< The internal control function for the server
 		std::vector<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>> managedWorkingSetList; ///< The list of managed working sets
 		std::map<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, bool> managedWorkingSetIopLoadStateMap; ///< A map to hold the IOP load state per session
 		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> activeWorkingSet; ///< The active working set
+		std::weak_ptr<VirtualTerminalServerManagedWorkingSet> lastDataMaskWorkingSet; ///< The working set that most recently had a Data Mask displayed, which 4.6.14 falls back to when the last alarm clears
+		std::weak_ptr<VirtualTerminalServerManagedWorkingSet> displayedAlarmWorkingSet; ///< The working set whose Alarm Mask is on screen, so that the Alarm Mask displayed event fires on appearance rather than on every arbitration
+		std::uint32_t alarmActivationSequenceCounter = 0; ///< Monotonic source of the activation sequence numbers that order equal-priority alarms (4.6.14)
 		std::uint32_t statusMessageTimestamp_ms = 0; ///< The timestamp of the last status message sent
+		std::uint16_t displayedAlarmMaskObjectID = NULL_OBJECT_ID; ///< The object ID of the Alarm Mask currently on screen, or NULL_OBJECT_ID when the displayed mask is not an Alarm Mask
 		std::uint16_t activeWorkingSetDataMaskObjectID = NULL_OBJECT_ID; ///< The object ID of the active working set's data mask
 		std::uint16_t activeWorkingSetSoftkeyMaskObjectID = NULL_OBJECT_ID; ///< The object ID of the active working set's soft key mask
 		std::uint8_t activeWorkingSetMasterAddress = NULL_CAN_ADDRESS; ///< The address of the active working set's master

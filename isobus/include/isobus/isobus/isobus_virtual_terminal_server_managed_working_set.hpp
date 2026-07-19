@@ -141,6 +141,18 @@ namespace isobus
 		/// @param[in] timestamp_ms The timestamp in milliseconds at which the lock was taken
 		void set_mask_lock(std::uint16_t objectID, std::uint16_t timeout_ms, std::uint32_t timestamp_ms, CANLibBadge<VirtualTerminalServer>);
 
+		/// @brief Returns the sequence number stamped on this working set when its active mask became
+		/// an Alarm Mask, which orders alarms chronologically for the priority arbitration of
+		/// ISO 11783-6 clause 4.6.14. A lower number was activated earlier. Zero means this working
+		/// set has no Alarm Mask asserted.
+		/// @returns The alarm activation sequence number, or zero when no Alarm Mask is asserted
+		std::uint32_t get_alarm_activation_sequence() const;
+
+		/// @brief Stores the sequence number that orders this working set's Alarm Mask activation
+		/// against those of other working sets (ISO 11783-6 clause 4.6.14).
+		/// @param[in] value The activation sequence number, or zero to record that no Alarm Mask is asserted
+		void set_alarm_activation_sequence(std::uint32_t value, CANLibBadge<VirtualTerminalServer>);
+
 		/// @brief Sets the object ID of the currently focused object
 		/// @param[in] objectID The object ID to set as the focused object
 		void set_object_focus(std::uint16_t objectID);
@@ -203,6 +215,7 @@ namespace isobus
 		std::uint32_t workingSetMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track sending of the maintenance message
 		std::uint32_t auxiliaryInputMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track if/when the working set sent an auxiliary input maintenance message
 		std::uint32_t maskLockTimestamp_ms = 0; ///< A timestamp (in ms) marking when the Lock/Unlock Mask command (F.46) took the current lock
+		std::uint32_t alarmActivationSequence = 0; ///< Orders this working set's Alarm Mask activation against other working sets' for the clause 4.6.14 tie-break; zero means no Alarm Mask is asserted
 		std::uint16_t focusedObject = NULL_OBJECT_ID; ///< Stores the object ID of the currently focused object
 		std::uint16_t objectOpenForInput = NULL_OBJECT_ID; ///< Stores the object ID of the object that is open for operator input, or NULL_OBJECT_ID when no input field is open
 		std::uint16_t activeColourMapObjectId = NULL_OBJECT_ID; ///< The object ID of the Colour Map selected by the Select Colour Map command (F.60), or NULL_OBJECT_ID for the default palette
