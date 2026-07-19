@@ -45,6 +45,10 @@ namespace isobus
 		/// @returns The working set object in the object pool, if one exists, otherwise an empty shared pointer
 		std::shared_ptr<VTObject> get_working_set_object();
 
+		/// @brief Returns the object ID of the working set object itself
+		/// @returns The object ID of the working set object, or NULL_OBJECT_ID if no pool has been parsed
+		std::uint16_t get_working_set_object_id() const;
+
 		/// @brief Appends raw IOP data to the working set's IOP file data
 		/// @param[in] dataToAdd The raw IOP data to add to the working set
 		void add_iop_raw_data(const std::vector<std::uint8_t> &dataToAdd);

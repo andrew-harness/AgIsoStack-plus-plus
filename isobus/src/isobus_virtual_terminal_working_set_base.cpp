@@ -2397,6 +2397,11 @@ namespace isobus
 		return get_object_by_id(workingSetID);
 	}
 
+	std::uint16_t VirtualTerminalWorkingSetBase::get_working_set_object_id() const
+	{
+		return workingSetID;
+	}
+
 	bool VirtualTerminalWorkingSetBase::get_object_id_exists(std::uint16_t objectID)
 	{
 		bool retVal;

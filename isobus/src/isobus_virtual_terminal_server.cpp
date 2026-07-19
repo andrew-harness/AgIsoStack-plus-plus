@@ -941,7 +941,7 @@ namespace isobus
 						case VirtualTerminalObjectType::InputBoolean:
 						{
 							std::static_pointer_cast<InputBoolean>(lTargetObject)->set_value(get_byte(value, 0));
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 							send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
 						}
 						break;
@@ -949,7 +949,7 @@ namespace isobus
 						case VirtualTerminalObjectType::InputNumber:
 						{
 							std::static_pointer_cast<InputNumber>(lTargetObject)->set_value(value);
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 							send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
 						}
 						break;
@@ -957,7 +957,7 @@ namespace isobus
 						case VirtualTerminalObjectType::InputList:
 						{
 							std::static_pointer_cast<InputList>(lTargetObject)->set_value(get_byte(value, 0));
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 							send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
 						}
 						break;
@@ -965,7 +965,7 @@ namespace isobus
 						case VirtualTerminalObjectType::OutputNumber:
 						{
 							std::static_pointer_cast<OutputNumber>(lTargetObject)->set_value(value);
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 							send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
 						}
 						break;
@@ -973,7 +973,7 @@ namespace isobus
 						case VirtualTerminalObjectType::OutputList:
 						{
 							std::static_pointer_cast<OutputList>(lTargetObject)->set_value(get_byte(value, 0));
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 							send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
 						}
 						break;
@@ -981,7 +981,7 @@ namespace isobus
 						case VirtualTerminalObjectType::OutputMeter:
 						{
 							std::static_pointer_cast<OutputMeter>(lTargetObject)->set_value(get_low_16_bits(value));
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 							send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
 						}
 						break;
@@ -989,7 +989,7 @@ namespace isobus
 						case VirtualTerminalObjectType::OutputLinearBarGraph:
 						{
 							std::static_pointer_cast<OutputLinearBarGraph>(lTargetObject)->set_value(get_low_16_bits(value));
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 							send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
 						}
 						break;
@@ -997,7 +997,7 @@ namespace isobus
 						case VirtualTerminalObjectType::OutputArchedBarGraph:
 						{
 							std::static_pointer_cast<OutputArchedBarGraph>(lTargetObject)->set_value(get_low_16_bits(value));
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 							send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
 						}
 						break;
@@ -1005,7 +1005,7 @@ namespace isobus
 						case VirtualTerminalObjectType::NumberVariable:
 						{
 							std::static_pointer_cast<NumberVariable>(lTargetObject)->set_value(value);
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 							send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
 						}
 						break;
@@ -1013,7 +1013,7 @@ namespace isobus
 						case VirtualTerminalObjectType::ObjectPointer:
 						{
 							std::static_pointer_cast<ObjectPointer>(lTargetObject)->set_value(get_low_16_bits(value));
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 							send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
 						}
 						break;
@@ -1071,7 +1071,7 @@ namespace isobus
 				{
 					std::static_pointer_cast<Container>(targetObject)->set_hidden(0 == data[3]);
 					send_hide_show_object_response(objectId, 0, (0 != data[3]), managedWorkingSet->get_control_function());
-					onRepaintEventDispatcher.call(managedWorkingSet);
+					dispatch_repaint(managedWorkingSet);
 
 					if (0 == data[3])
 					{
@@ -1107,7 +1107,7 @@ namespace isobus
 							{
 								std::static_pointer_cast<InputBoolean>(lTargetObject)->set_enabled(0 != data[3]);
 								send_enable_disable_object_response(objectId, 0, (0 != data[3]), managedWorkingSet->get_control_function());
-								onRepaintEventDispatcher.call(managedWorkingSet);
+								dispatch_repaint(managedWorkingSet);
 							}
 							break;
 
@@ -1115,7 +1115,7 @@ namespace isobus
 							{
 								std::static_pointer_cast<InputList>(lTargetObject)->set_option(InputList::Options::Enabled, (0 != data[3]));
 								send_enable_disable_object_response(objectId, 0, (0 != data[3]), managedWorkingSet->get_control_function());
-								onRepaintEventDispatcher.call(managedWorkingSet);
+								dispatch_repaint(managedWorkingSet);
 							}
 							break;
 
@@ -1123,7 +1123,7 @@ namespace isobus
 							{
 								std::static_pointer_cast<InputString>(lTargetObject)->set_enabled((0 != data[3]));
 								send_enable_disable_object_response(objectId, 0, (0 != data[3]), managedWorkingSet->get_control_function());
-								onRepaintEventDispatcher.call(managedWorkingSet);
+								dispatch_repaint(managedWorkingSet);
 							}
 							break;
 
@@ -1131,7 +1131,7 @@ namespace isobus
 							{
 								std::static_pointer_cast<InputNumber>(lTargetObject)->set_option2(InputNumber::Options2::Enabled, (0 != data[3]));
 								send_enable_disable_object_response(objectId, 0, (0 != data[3]), managedWorkingSet->get_control_function());
-								onRepaintEventDispatcher.call(managedWorkingSet);
+								dispatch_repaint(managedWorkingSet);
 							}
 							break;
 
@@ -1139,7 +1139,7 @@ namespace isobus
 							{
 								std::static_pointer_cast<Button>(lTargetObject)->set_option(Button::Options::Disabled, (0 == data[3]));
 								send_enable_disable_object_response(objectId, 0, (0 != data[3]), managedWorkingSet->get_control_function());
-								onRepaintEventDispatcher.call(managedWorkingSet);
+								dispatch_repaint(managedWorkingSet);
 							}
 							break;
 
@@ -1178,7 +1178,7 @@ namespace isobus
 						auto yRelativeChange = static_cast<std::int8_t>(static_cast<std::int16_t>(data[6]) - 127);
 						bool anyObjectMatched = parentObject->offset_all_children_with_id(objectID, xRelativeChange, yRelativeChange);
 
-						onRepaintEventDispatcher.call(managedWorkingSet);
+						dispatch_repaint(managedWorkingSet);
 
 						if (anyObjectMatched)
 						{
@@ -1221,6 +1221,19 @@ namespace isobus
 						// An input field open for input belongs to the mask that was visible. Moving to
 						// another mask ends that input, so ESC must not report the field as still open.
 						managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
+
+						// F.46 releases a mask lock when the locked mask goes from visible to hidden, and
+						// requires an unsolicited response saying so. The release is conditioned on the
+						// locked mask actually being the one leaving the screen: a client that re-selects
+						// the mask it already has visible, which some use as a refresh idiom, hides
+						// nothing and keeps its lock.
+						if ((NULL_OBJECT_ID != managedWorkingSet->get_mask_lock_object_id()) &&
+						    (newActiveMaskObjectId != managedWorkingSet->get_mask_lock_object_id()))
+						{
+							managedWorkingSet->set_mask_lock(NULL_OBJECT_ID, 0, 0, {});
+							send_lock_unlock_mask_response(0, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::UnsolicitedUnlockMaskIsHidden)), true, managedWorkingSet->get_control_function());
+							LOG_DEBUG("[VT Server]: Client %u mask lock released because the locked mask is no longer visible", managedWorkingSet->get_control_function()->get_address());
+						}
 						send_change_active_mask_response(newActiveMaskObjectId, 0, managedWorkingSet->get_control_function());
 
 						if (activeWorkingSet == managedWorkingSet)
@@ -1254,7 +1267,7 @@ namespace isobus
 				{
 					managedWorkingSet->set_active_colour_map_object_id(NULL_OBJECT_ID, {});
 					send_select_colour_map_response(objectId, 0, managedWorkingSet->get_control_function());
-					onRepaintEventDispatcher.call(managedWorkingSet);
+					dispatch_repaint(managedWorkingSet);
 					LOG_DEBUG("[VT Server]: Client %u select colour map command restored the default palette", managedWorkingSet->get_control_function()->get_address());
 				}
 				else
@@ -1275,7 +1288,7 @@ namespace isobus
 					{
 						managedWorkingSet->set_active_colour_map_object_id(objectId, {});
 						send_select_colour_map_response(objectId, 0, managedWorkingSet->get_control_function());
-						onRepaintEventDispatcher.call(managedWorkingSet);
+						dispatch_repaint(managedWorkingSet);
 						LOG_DEBUG("[VT Server]: Client %u selected colour map object %u", managedWorkingSet->get_control_function()->get_address(), objectId);
 					}
 				}
@@ -1349,7 +1362,7 @@ namespace isobus
 								}
 								stringVariable->set_value(newStringValue);
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
-								onRepaintEventDispatcher.call(managedWorkingSet);
+								dispatch_repaint(managedWorkingSet);
 								LOG_DEBUG("[VT Server]: Client %u change string value command for string variable object %u. Value: " + newStringValue, managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 							}
 							break;
@@ -1366,7 +1379,7 @@ namespace isobus
 								}
 								outputString->set_value(newStringValue);
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
-								onRepaintEventDispatcher.call(managedWorkingSet);
+								dispatch_repaint(managedWorkingSet);
 								LOG_DEBUG("[VT Server]: Client %u change string value command for output string object %u. Value: " + newStringValue, managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 							}
 							break;
@@ -1383,7 +1396,7 @@ namespace isobus
 								}
 								inputString->set_value(newStringValue);
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
-								onRepaintEventDispatcher.call(managedWorkingSet);
+								dispatch_repaint(managedWorkingSet);
 								LOG_DEBUG("[VT Server]: Client %u change string value command for input string object %u. Value: " + newStringValue, managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 							}
 							break;
@@ -1429,7 +1442,7 @@ namespace isobus
 							fillObject->set_type(static_cast<FillAttributes::FillType>(data[3]));
 							fillObject->set_background_color(data[4]);
 							send_change_fill_attributes_response(objectIdToChange, 0, message.get_source_control_function());
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 							LOG_DEBUG("[VT Server]: Client %u change fill attributes command for object %u", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 						}
 						else
@@ -1488,7 +1501,7 @@ namespace isobus
 											wasFound = true;
 											parentObject->set_child_x(i, newXPosition);
 											parentObject->set_child_y(i, newYPosition);
-											onRepaintEventDispatcher.call(managedWorkingSet);
+											dispatch_repaint(managedWorkingSet);
 										}
 									}
 
@@ -1555,7 +1568,7 @@ namespace isobus
 							// retargets the active mask, and attribute 2 on a Data or Alarm Mask retargets its soft key mask.
 							refresh_active_mask_status_fields();
 						}
-						onRepaintEventDispatcher.call(managedWorkingSet);
+						dispatch_repaint(managedWorkingSet);
 						process_macro(targetObject, EventID::OnChangeAttribute, targetObject->get_object_type(), managedWorkingSet);
 					}
 					else
@@ -1593,7 +1606,7 @@ namespace isobus
 								targetObject->set_height(newHeight);
 								success = true;
 								LOG_DEBUG("[VT Server]: Client %u change size command: Object: %u, Width: %u, Height: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight);
-								onRepaintEventDispatcher.call(managedWorkingSet);
+								dispatch_repaint(managedWorkingSet);
 							}
 							else
 							{
@@ -1624,7 +1637,7 @@ namespace isobus
 							targetObject->set_height(newHeight);
 							success = true;
 							LOG_DEBUG("[VT Server]: Client %u change size command: Object: %u, Width: %u, Height: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight);
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 						}
 						break;
 
@@ -1670,7 +1683,7 @@ namespace isobus
 								{
 									send_change_list_item_response(objectID, newObjectID, 0, listIndex, message.get_source_control_function());
 									LOG_DEBUG("[VT Server]: Client %u change list item command: Object ID: %u, New Object ID: %u, Index: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newObjectID, listIndex);
-									onRepaintEventDispatcher.call(managedWorkingSet);
+									dispatch_repaint(managedWorkingSet);
 								}
 								else
 								{
@@ -1695,7 +1708,7 @@ namespace isobus
 								{
 									send_change_list_item_response(objectID, newObjectID, 0, listIndex, message.get_source_control_function());
 									LOG_DEBUG("[VT Server]: Client %u change list item command: Object ID: %u, New Object ID: %u, Index: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newObjectID, listIndex);
-									onRepaintEventDispatcher.call(managedWorkingSet);
+									dispatch_repaint(managedWorkingSet);
 								}
 								else
 								{
@@ -1748,7 +1761,7 @@ namespace isobus
 						font->set_style(fontStyle);
 						LOG_DEBUG("[VT Server]: Client %u change font attributes command: ObjectID: %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 						send_change_font_attributes_response(objectID, 0, message.get_source_control_function());
-						onRepaintEventDispatcher.call(managedWorkingSet);
+						dispatch_repaint(managedWorkingSet);
 					}
 					else
 					{
@@ -1781,7 +1794,7 @@ namespace isobus
 					line->set_line_art_bit_pattern(lineArt);
 					LOG_DEBUG("[VT Server]: Client %u change line attributes command: ObjectID: %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 					send_change_line_attributes_response(objectID, 0, message.get_source_control_function());
-					onRepaintEventDispatcher.call(managedWorkingSet);
+					dispatch_repaint(managedWorkingSet);
 				}
 				else
 				{
@@ -1905,7 +1918,7 @@ namespace isobus
 							LOG_DEBUG("[VT Server]: Client %u change background colour command: colour = %u", managedWorkingSet->get_control_function()->get_address(), objectID, backgroundColour);
 							send_change_background_colour_response(objectID, 0, backgroundColour, message.get_source_control_function());
 							process_macro(targetObject, EventID::OnChangeBackgroundColour, targetObject->get_object_type(), managedWorkingSet);
-							onRepaintEventDispatcher.call(managedWorkingSet);
+							dispatch_repaint(managedWorkingSet);
 						}
 						break;
 
@@ -2252,6 +2265,12 @@ namespace isobus
 					// Deactivating the pool ends any input it had open, so ESC must not go on reporting
 					// a field of the deleted pool as open and running its macros.
 					managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
+
+					// The deleted pool declared whatever mask was locked, so the lock goes with it and no
+					// later repaint may be withheld on its account. No unsolicited response accompanies
+					// this: F.46 requires one only for the timeout and mask-hidden releases, and the client
+					// asked for this deletion and is answered by the Delete Object Pool response below.
+					managedWorkingSet->set_mask_lock(NULL_OBJECT_ID, 0, 0, {});
 					send_delete_object_pool_response(0, message.get_source_control_function());
 				}
 				else
@@ -2329,7 +2348,7 @@ namespace isobus
 					line->set_height(newHeight);
 					line->set_line_direction(static_cast<OutputLine::LineDirection>(lineDirection));
 					send_change_end_point_response(objectID, 0, managedWorkingSet->get_control_function());
-					onRepaintEventDispatcher.call(managedWorkingSet);
+					dispatch_repaint(managedWorkingSet);
 					process_macro(targetObject, EventID::OnChangeEndpoint, targetObject->get_object_type(), managedWorkingSet);
 					LOG_DEBUG("[VT Server]: Client %u change end point command: Object: %u, Width: %u, Height: %u, Direction: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight, lineDirection);
 				}
@@ -2393,7 +2412,7 @@ namespace isobus
 					// Table B.32 maps this command to the On Refresh event, which the EventID enum documents as
 					// having no associated event ID because macros cannot be attached to it, so a repaint is the
 					// whole required behaviour and no macro is run.
-					onRepaintEventDispatcher.call(managedWorkingSet);
+					dispatch_repaint(managedWorkingSet);
 					LOG_DEBUG("[VT Server]: Client %u change polygon scale command: Object: %u, Width: %u, Height: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight);
 				}
 			}
@@ -2426,6 +2445,95 @@ namespace isobus
 					{
 						process_macro(targetObject, EventID::OnESC, targetObject->get_object_type(), managedWorkingSet);
 					}
+				}
+			}
+			break;
+
+			case Function::LockUnlockMaskCommand:
+			{
+				// F.46 byte 2 selects between the two operations this command performs.
+				constexpr std::uint8_t UNLOCK_MASK = 0;
+				constexpr std::uint8_t LOCK_MASK = 1;
+
+				const std::uint8_t command = data[1];
+				const std::uint16_t objectID = get_little_endian_uint16(data, 2);
+				const std::uint16_t timeout_ms = get_little_endian_uint16(data, 4);
+
+				// F.46 bytes 3-4 must name the mask the operator can actually see, which is the active
+				// working set's own active mask. A working set that is not the active one shows nothing,
+				// so its lock target can never match.
+				std::uint16_t visibleMaskObjectID = NULL_OBJECT_ID;
+
+				if (activeWorkingSet == managedWorkingSet)
+				{
+					auto workingSetObject = managedWorkingSet->get_working_set_object();
+
+					if (nullptr != workingSetObject)
+					{
+						visibleMaskObjectID = std::static_pointer_cast<WorkingSet>(workingSetObject)->get_active_mask();
+					}
+				}
+
+				const bool namesTheVisibleMask = (NULL_OBJECT_ID != visibleMaskObjectID) && (objectID == visibleMaskObjectID);
+				const bool isLocked = (NULL_OBJECT_ID != managedWorkingSet->get_mask_lock_object_id());
+
+				if (LOCK_MASK == command)
+				{
+					if (!namesTheVisibleMask)
+					{
+						send_lock_unlock_mask_response(command, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::CommandIgnoredNoMaskVisibleOrObjectIDMismatch)), false, managedWorkingSet->get_control_function());
+						LOG_WARNING("[VT Server]: Client %u lock mask command ignored: object %u is not the visible mask", managedWorkingSet->get_control_function()->get_address(), objectID);
+					}
+					else if (is_any_alarm_mask_active())
+					{
+						// F.46 rejects the lock when an Alarm Mask from any working set is active and is in
+						// the same display area. A single display area is the only topology this server
+						// supports, so every active Alarm Mask shares the area with the mask being locked.
+						send_lock_unlock_mask_response(command, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::LockIgnoredAlarmMaskIsActive)), false, managedWorkingSet->get_control_function());
+						LOG_WARNING("[VT Server]: Client %u lock mask command ignored: an alarm mask is active", managedWorkingSet->get_control_function()->get_address());
+					}
+					else if (isLocked)
+					{
+						send_lock_unlock_mask_response(command, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::LockIgnoredAlreadyLocked)), false, managedWorkingSet->get_control_function());
+						LOG_WARNING("[VT Server]: Client %u lock mask command ignored: mask %u is already locked", managedWorkingSet->get_control_function()->get_address(), objectID);
+					}
+					else
+					{
+						managedWorkingSet->set_mask_lock(objectID, timeout_ms, SystemTiming::get_timestamp_ms(), {});
+						send_lock_unlock_mask_response(command, 0, false, managedWorkingSet->get_control_function());
+						LOG_DEBUG("[VT Server]: Client %u locked mask %u with a timeout of %u ms", managedWorkingSet->get_control_function()->get_address(), objectID, timeout_ms);
+					}
+				}
+				else if (UNLOCK_MASK == command)
+				{
+					if (!namesTheVisibleMask)
+					{
+						// F.46 answers an unlock aimed at a hidden mask immediately and reports it ignored.
+						send_lock_unlock_mask_response(command, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::CommandIgnoredNoMaskVisibleOrObjectIDMismatch)), false, managedWorkingSet->get_control_function());
+						LOG_WARNING("[VT Server]: Client %u unlock mask command ignored: object %u is not the visible mask", managedWorkingSet->get_control_function()->get_address(), objectID);
+					}
+					else if (!isLocked)
+					{
+						send_lock_unlock_mask_response(command, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::UnlockIgnoredNotLocked)), false, managedWorkingSet->get_control_function());
+						LOG_WARNING("[VT Server]: Client %u unlock mask command ignored: mask %u is not locked", managedWorkingSet->get_control_function()->get_address(), objectID);
+					}
+					else
+					{
+						// must clear the lock before the repaint, and repaint before the response: F.46
+						// forbids answering the unlock until the mask has been completely refreshed, and
+						// dispatch_repaint withholds that refresh for as long as the lock is held. The
+						// repaint runs synchronously on this thread, so it has completed by the time the
+						// response reaches the bus.
+						managedWorkingSet->set_mask_lock(NULL_OBJECT_ID, 0, 0, {});
+						dispatch_repaint(managedWorkingSet);
+						send_lock_unlock_mask_response(command, 0, false, managedWorkingSet->get_control_function());
+						LOG_DEBUG("[VT Server]: Client %u unlocked mask %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+					}
+				}
+				else
+				{
+					send_lock_unlock_mask_response(command, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::AnyOtherError)), false, managedWorkingSet->get_control_function());
+					LOG_WARNING("[VT Server]: Client %u lock/unlock mask command has an invalid command byte of %u", managedWorkingSet->get_control_function()->get_address(), command);
 				}
 			}
 			break;
@@ -3388,6 +3496,46 @@ namespace isobus
 		return retVal;
 	}
 
+	bool VirtualTerminalServer::send_lock_unlock_mask_response(std::uint8_t command, std::uint8_t errorBitfield, bool unsolicited, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer;
+
+			buffer[0] = static_cast<std::uint8_t>(Function::LockUnlockMaskCommand);
+			buffer[1] = command;
+			buffer[2] = errorBitfield;
+			buffer[3] = 0xFF;
+			buffer[4] = 0xFF;
+			buffer[5] = 0xFF;
+			buffer[6] = 0xFF;
+			buffer[7] = 0xFF;
+
+			if (unsolicited)
+			{
+				// 4.6.11.4 f) withholds the VT's response to a command a macro contains. A release the VT
+				// originates is not a response to any command, and F.46 requires it to reach the working
+				// set, so it bypasses that suppression the same way the VT Status and the activation
+				// messages do. Routing it through send_response would drop the notification whenever a
+				// lock happened to be released from inside a macro, leaving the client believing it still
+				// held a lock the server had already given up.
+				retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+				                                                        buffer.data(),
+				                                                        CAN_DATA_LENGTH,
+				                                                        serverInternalControlFunction,
+				                                                        destination,
+				                                                        get_priority());
+			}
+			else
+			{
+				retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
+			}
+		}
+		return retVal;
+	}
+
 	bool VirtualTerminalServer::send_change_size_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
 	{
 		bool retVal = false;
@@ -3722,6 +3870,56 @@ namespace isobus
 		return retVal;
 	}
 
+	bool VirtualTerminalServer::is_any_alarm_mask_active() const
+	{
+		bool retVal = false;
+
+		for (const auto &ws : managedWorkingSetList)
+		{
+			// This reads working sets other than the one being served, so it must not touch their object
+			// trees through get_object_by_id: that is std::map::operator[], which default-inserts on a
+			// miss. Inserting here would both pollute another client's tree with a phantom entry and race
+			// its pool-parsing worker thread, which writes the same map. Look up through the const tree
+			// instead, and skip a working set whose pool is still being parsed -- a half-built tree cannot
+			// meaningfully report an active alarm mask and is being written from another thread.
+			if (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Running == ws->get_object_pool_processing_state())
+			{
+				continue;
+			}
+
+			const auto &objectTree = ws->get_object_tree();
+			auto workingSetEntry = objectTree.find(ws->get_working_set_object_id());
+
+			if ((objectTree.end() == workingSetEntry) || (nullptr == workingSetEntry->second))
+			{
+				continue;
+			}
+
+			auto maskEntry = objectTree.find(std::static_pointer_cast<WorkingSet>(workingSetEntry->second)->get_active_mask());
+
+			if ((objectTree.end() != maskEntry) &&
+			    (nullptr != maskEntry->second) &&
+			    (VirtualTerminalObjectType::AlarmMask == maskEntry->second->get_object_type()))
+			{
+				retVal = true;
+				break;
+			}
+		}
+		return retVal;
+	}
+
+	void VirtualTerminalServer::dispatch_repaint(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet)
+	{
+		// ISO 11783-6 F.46: while a mask is locked, its on screen presentation is not updated for any
+		// reason. Commands, key presses, events and macros are still processed, so only the refresh is
+		// withheld here and the object model behind it goes on changing.
+		if (NULL_OBJECT_ID != workingSet->get_mask_lock_object_id())
+		{
+			return;
+		}
+		onRepaintEventDispatcher.call(workingSet);
+	}
+
 	bool VirtualTerminalServer::send_supported_objects(std::shared_ptr<ControlFunction> destination) const
 	{
 		auto supportedObjects = get_supported_objects();
@@ -3822,6 +4020,25 @@ namespace isobus
 		{
 			statusMessageTimestamp_ms = isobus::SystemTiming::get_timestamp_ms();
 			statusMessagePending = false;
+		}
+
+		// ISO 11783-6 F.46: a Lock Mask command may carry a timeout, and once it expires the VT releases
+		// the lock itself if the working set has not, so a client that stops talking cannot freeze the
+		// operator's screen indefinitely. F.46 requires the release to be announced with an unsolicited
+		// Lock/Unlock Mask Response, which is the client's only notice that its lock is gone.
+		for (const auto &ws : managedWorkingSetList)
+		{
+			const std::uint16_t lockTimeout_ms = ws->get_mask_lock_timeout_ms();
+
+			if ((NULL_OBJECT_ID != ws->get_mask_lock_object_id()) &&
+			    (0 != lockTimeout_ms) &&
+			    (isobus::SystemTiming::time_expired_ms(ws->get_mask_lock_timestamp_ms(), lockTimeout_ms)))
+			{
+				ws->set_mask_lock(NULL_OBJECT_ID, 0, 0, {});
+				dispatch_repaint(ws);
+				send_lock_unlock_mask_response(0, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::UnsolicitedUnlockTimeoutOccurred)), true, ws->get_control_function());
+				LOG_WARNING("[VT Server]: Mask lock held by the working set at address %u timed out and was released.", (nullptr != ws->get_control_function()) ? ws->get_control_function()->get_address() : isobus::NULL_CAN_ADDRESS);
+			}
 		}
 
 		for (const auto &ws : managedWorkingSetList)

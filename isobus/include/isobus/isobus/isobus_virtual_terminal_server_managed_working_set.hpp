@@ -122,6 +122,25 @@ namespace isobus
 		/// @param[in] value The Colour Map object ID to activate, or NULL_OBJECT_ID for the default palette
 		void set_active_colour_map_object_id(std::uint16_t value, CANLibBadge<VirtualTerminalServer>);
 
+		/// @brief Returns the object ID of the mask this working set has locked with the Lock/Unlock Mask
+		/// command (F.46), or NULL_OBJECT_ID when it holds no lock.
+		/// @returns The locked mask's object ID, or NULL_OBJECT_ID when no mask is locked
+		std::uint16_t get_mask_lock_object_id() const;
+
+		/// @brief Returns the lock timeout that the Lock Mask command carried (F.46 bytes 5-6)
+		/// @returns The lock timeout in milliseconds, or zero when the lock does not time out
+		std::uint16_t get_mask_lock_timeout_ms() const;
+
+		/// @brief Returns the timestamp at which the mask lock was taken
+		/// @returns The timestamp in milliseconds at which the mask lock was taken
+		std::uint32_t get_mask_lock_timestamp_ms() const;
+
+		/// @brief Stores the mask lock taken by the Lock/Unlock Mask command (F.46).
+		/// @param[in] objectID The object ID of the mask being locked, or NULL_OBJECT_ID to release the lock
+		/// @param[in] timeout_ms The lock timeout in milliseconds, or zero for no timeout
+		/// @param[in] timestamp_ms The timestamp in milliseconds at which the lock was taken
+		void set_mask_lock(std::uint16_t objectID, std::uint16_t timeout_ms, std::uint32_t timestamp_ms, CANLibBadge<VirtualTerminalServer>);
+
 		/// @brief Sets the object ID of the currently focused object
 		/// @param[in] objectID The object ID to set as the focused object
 		void set_object_focus(std::uint16_t objectID);
@@ -183,9 +202,12 @@ namespace isobus
 		ObjectPoolProcessingThreadState processingState = ObjectPoolProcessingThreadState::None; ///< Stores the state of processing the object pool
 		std::uint32_t workingSetMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track sending of the maintenance message
 		std::uint32_t auxiliaryInputMaintenanceMessageTimestamp_ms = 0; ///< A timestamp (in ms) to track if/when the working set sent an auxiliary input maintenance message
+		std::uint32_t maskLockTimestamp_ms = 0; ///< A timestamp (in ms) marking when the Lock/Unlock Mask command (F.46) took the current lock
 		std::uint16_t focusedObject = NULL_OBJECT_ID; ///< Stores the object ID of the currently focused object
 		std::uint16_t objectOpenForInput = NULL_OBJECT_ID; ///< Stores the object ID of the object that is open for operator input, or NULL_OBJECT_ID when no input field is open
 		std::uint16_t activeColourMapObjectId = NULL_OBJECT_ID; ///< The object ID of the Colour Map selected by the Select Colour Map command (F.60), or NULL_OBJECT_ID for the default palette
+		std::uint16_t maskLockObjectID = NULL_OBJECT_ID; ///< The object ID of the mask locked by the Lock/Unlock Mask command (F.46), or NULL_OBJECT_ID when no mask is locked
+		std::uint16_t maskLockTimeout_ms = 0; ///< The lock timeout (in ms) the Lock Mask command carried, or zero when the lock does not time out
 		bool wasLoadedFromNonVolatileMemory = false; ///< Used to tell the server how this object pool was obtained
 		bool loadedViaExtendedVersionCommand = false; ///< True when the pool was loaded via an Extended Load Version command (0xD5), so the deferred load response uses the extended command byte
 		bool workingSetDeletionRequested = false; ///< Used to tell the server to delete this working set

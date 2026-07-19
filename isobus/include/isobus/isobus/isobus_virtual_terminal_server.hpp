@@ -516,6 +516,19 @@ namespace isobus
 			AnyOtherError = 4
 		};
 
+		/// @brief Enumerates the bit indices of the error fields that can be set in a lock/unlock mask response
+		enum class LockUnlockMaskErrorBit : std::uint8_t
+		{
+			CommandIgnoredNoMaskVisibleOrObjectIDMismatch = 0,
+			LockIgnoredAlreadyLocked = 1,
+			UnlockIgnoredNotLocked = 2,
+			LockIgnoredAlarmMaskIsActive = 3,
+			UnsolicitedUnlockTimeoutOccurred = 4,
+			UnsolicitedUnlockMaskIsHidden = 5,
+			UnsolicitedUnlockOperatorInduced = 6,
+			AnyOtherError = 7
+		};
+
 		/// @brief Enumerates the bit indices of the error fields that can be set in a delete object pool response
 		enum class DeleteObjectPoolErrorBit : std::uint8_t
 		{
@@ -862,6 +875,16 @@ namespace isobus
 		/// @returns true if the message was sent, otherwise false
 		bool send_esc_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
 
+		/// @brief Sends a response to a lock/unlock mask command, or an unsolicited response when the VT
+		/// releases a lock on its own initiative
+		/// @param[in] command The command being answered, 0 for unlock and 1 for lock
+		/// @param[in] errorBitfield An error bitfield
+		/// @param[in] unsolicited True for a release the VT originates, which bypasses the macro response
+		/// suppression because it is not a response to any command, false for an answer to a received command
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false
+		bool send_lock_unlock_mask_response(std::uint8_t command, std::uint8_t errorBitfield, bool unsolicited, std::shared_ptr<ControlFunction> destination) const;
+
 		/// @brief Sends a response to a change size command
 		/// @param[in] objectID The object ID for the object whose size was meant to be changed
 		/// @param[in] errorBitfield An error bitfield
@@ -983,6 +1006,15 @@ namespace isobus
 		/// started and its response has not yet been queued (ISO 11783-6 G.2 byte 7 bit 4)
 		/// @returns true if a parse is in flight for any managed working set
 		bool is_any_object_pool_parsing() const;
+
+		/// @brief Returns whether the mask any managed working set currently shows is an Alarm Mask
+		/// @returns true if an Alarm Mask is the active mask of any managed working set
+		bool is_any_alarm_mask_active() const;
+
+		/// @brief Raises the repaint event for a working set unless that working set has its visible mask
+		/// locked, in which case the on screen presentation is held until the lock is released.
+		/// @param[in] workingSet The working set whose presentation would be refreshed
+		void dispatch_repaint(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet);
 
 		/// @brief Sends the list of objects that the server supports to a client, usually in
 		/// response to a "get supported objects" message, which is used by a client.

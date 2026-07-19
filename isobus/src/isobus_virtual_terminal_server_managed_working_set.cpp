@@ -128,6 +128,28 @@ namespace isobus
 		activeColourMapObjectId = value;
 	}
 
+	std::uint16_t VirtualTerminalServerManagedWorkingSet::get_mask_lock_object_id() const
+	{
+		return maskLockObjectID;
+	}
+
+	std::uint16_t VirtualTerminalServerManagedWorkingSet::get_mask_lock_timeout_ms() const
+	{
+		return maskLockTimeout_ms;
+	}
+
+	std::uint32_t VirtualTerminalServerManagedWorkingSet::get_mask_lock_timestamp_ms() const
+	{
+		return maskLockTimestamp_ms;
+	}
+
+	void VirtualTerminalServerManagedWorkingSet::set_mask_lock(std::uint16_t objectID, std::uint16_t timeout_ms, std::uint32_t timestamp_ms, CANLibBadge<VirtualTerminalServer>)
+	{
+		maskLockObjectID = objectID;
+		maskLockTimeout_ms = timeout_ms;
+		maskLockTimestamp_ms = timestamp_ms;
+	}
+
 	void VirtualTerminalServerManagedWorkingSet::set_object_focus(std::uint16_t objectID)
 	{
 		focusedObject = objectID;
