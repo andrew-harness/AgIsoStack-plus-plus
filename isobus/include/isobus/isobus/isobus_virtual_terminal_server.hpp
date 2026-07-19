@@ -60,6 +60,19 @@ namespace isobus
 		/// @returns true if the message was sent, otherwise false
 		bool send_button_activation_message(KeyActivationCode activationCode, std::uint16_t objectId, std::uint16_t parentObjectId, std::uint8_t keyNumber, std::shared_ptr<ControlFunction> destination) const;
 
+		/// @brief The Pointing Event message allows the VT to transmit an operator touch, click or drag of a position in the
+		/// Data Mask area to the Working Set Master, when the VT has a touch screen or a pointing device.
+		/// @details This message is not used when a Button or an input object is touched or clicked on; the Button Activation
+		/// message or the VT Select Input Object message is sent in that case. Annex H.6 asks for the message on press and on
+		/// release, and every 200 ms while the position is held.
+		/// @param[in] xPosition X position in pixels relative to the top left corner of the Data Mask area
+		/// @param[in] yPosition Y position in pixels relative to the top left corner of the Data Mask area
+		/// @param[in] touchState 0 for released, 1 for pressed, 2 for held in VT version 4 and later; 0xFF in VT version 3 and
+		/// prior, where the byte is reserved and a pressed event is implied
+		/// @param[in] destination The VT client to send the message to
+		/// @returns true if the message was sent, otherwise false
+		bool send_pointing_event_message(std::uint16_t xPosition, std::uint16_t yPosition, std::uint8_t touchState, std::shared_ptr<ControlFunction> destination) const;
+
 		/// @brief Sends the VT Change Numeric Value message
 		/// @details The VT sends this message any time the operator enters a numeric value for an input object or variable,
 		/// regardless of whether or not the value changed.This message is not sent if the input was aborted(in this case a VT ESC message would be sent instead).For input objects that have a numeric variable reference,

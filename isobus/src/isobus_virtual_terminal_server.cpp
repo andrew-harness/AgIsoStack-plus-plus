@@ -3300,6 +3300,39 @@ namespace isobus
 		return retVal;
 	}
 
+	bool VirtualTerminalServer::send_pointing_event_message(std::uint16_t xPosition, std::uint16_t yPosition, std::uint8_t touchState, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+				static_cast<std::uint8_t>(Function::PointingEventMessage),
+				get_low_byte(xPosition),
+				get_high_byte(xPosition),
+				get_low_byte(yPosition),
+				get_high_byte(yPosition),
+				touchState,
+				0xFF, // Reserved
+				0xFF // Reserved
+			};
+
+			// This goes onto the bus directly rather than through send_response, which is the choke
+			// point that withholds the VT's response to a command contained in a macro (clause
+			// 4.6.11.4 f). A Pointing Event is an operator input event the VT originates, not a
+			// response to any command, so passing it through that choke point would silently drop
+			// operator input that happened to coincide with macro execution. The Button Activation
+			// and Soft Key Activation messages send directly for the same reason.
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+			                                                        buffer.data(),
+			                                                        CAN_DATA_LENGTH,
+			                                                        serverInternalControlFunction,
+			                                                        destination,
+			                                                        get_priority());
+		}
+		return retVal;
+	}
+
 	bool VirtualTerminalServer::send_change_numeric_value_message(std::uint16_t objectId, std::uint32_t value, std::shared_ptr<ControlFunction> destination) const
 	{
 		bool retVal = false;
