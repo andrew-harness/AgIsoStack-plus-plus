@@ -498,6 +498,19 @@ namespace isobus
 			}
 			break;
 
+			case Function::GetSupportedObjectsMessage:
+			{
+				// D.14/D.15 is a Get Technical Data query about the VT itself, like Get Hardware and
+				// Get Memory beside it, and its answer does not depend on any object pool. Answering
+				// it here rather than from the connection-dependent path lets a control function ask
+				// before it has uploaded anything -- which is when a working set actually wants to
+				// know, since the answer decides what it puts in the pool.
+				LOG_DEBUG("[VT Server]: Client at address %u requested the supported object list.", message.get_identifier().get_source_address());
+				send_supported_objects(message.get_source_control_function());
+				retVal = true;
+			}
+			break;
+
 			default:
 				break;
 		}
@@ -1292,13 +1305,6 @@ namespace isobus
 						LOG_DEBUG("[VT Server]: Client %u selected colour map object %u", managedWorkingSet->get_control_function()->get_address(), objectId);
 					}
 				}
-			}
-			break;
-
-			case Function::GetSupportedObjectsMessage:
-			{
-				send_supported_objects(message.get_source_control_function());
-				LOG_DEBUG("[VT Server]: Sent supported object list to client %u", managedWorkingSet->get_control_function()->get_address());
 			}
 			break;
 
@@ -4079,7 +4085,12 @@ namespace isobus
 		{
 			buffer.push_back(supportedObject);
 		}
-		return send_response(buffer.data(), CAN_DATA_LENGTH, destination);
+
+		// D.15 gives this response a variable data length: byte 2 counts the bytes that follow and
+		// the list runs to the end of the message. Sending CAN_DATA_LENGTH here would cap it at six
+		// object types while byte 2 still advertised the full count, so a conformant working set
+		// would read past the message it was given.
+		return send_response(buffer.data(), static_cast<std::uint32_t>(buffer.size()), destination);
 	}
 
 	bool VirtualTerminalServer::send_audio_signal_successful(std::shared_ptr<ControlFunction> destination) const
