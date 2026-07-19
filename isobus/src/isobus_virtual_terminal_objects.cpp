@@ -9,6 +9,8 @@
 #include "isobus/isobus/isobus_virtual_terminal_objects.hpp"
 #include "isobus/isobus/can_stack_logger.hpp"
 
+#include <algorithm>
+
 namespace isobus
 {
 	VTColourTable::VTColourTable()
@@ -7765,6 +7767,164 @@ namespace isobus
 			retVal = colourMapData[index];
 		}
 		return retVal;
+	}
+
+	VirtualTerminalObjectType ObjectLabelReferenceList::get_object_type() const
+	{
+		return VirtualTerminalObjectType::ObjectLabelRefrenceList;
+	}
+
+	std::uint32_t ObjectLabelReferenceList::get_minumum_object_length() const
+	{
+		return MIN_OBJECT_LENGTH;
+	}
+
+	bool ObjectLabelReferenceList::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool) const
+	{
+		// Table B.64 allows an object to be labelled at most once, and requires the object pool to be
+		// rejected when one is labelled more than once.
+		bool anyWrongChildType = has_duplicate_labelled_objects();
+
+		for (const auto &label : labels)
+		{
+			if (anyWrongChildType)
+			{
+				break;
+			}
+
+			// Verify the label string is a string variable or NULL_OBJECT_ID
+			if (NULL_OBJECT_ID != label.stringVariableID)
+			{
+				auto stringVariableObject = get_object_by_id(label.stringVariableID, objectPool);
+
+				if (nullptr != stringVariableObject)
+				{
+					if (VirtualTerminalObjectType::StringVariable != stringVariableObject->get_object_type())
+					{
+						anyWrongChildType = true;
+					}
+				}
+				else
+				{
+					anyWrongChildType = true;
+				}
+			}
+
+			// Verify the graphic representation exists or is NULL_OBJECT_ID. Table B.64 places no
+			// restriction on which type of object may be drawn as a designator.
+			if (NULL_OBJECT_ID != label.graphicObjectID)
+			{
+				if (nullptr == get_object_by_id(label.graphicObjectID, objectPool))
+				{
+					anyWrongChildType = true;
+				}
+			}
+		}
+
+		for (const auto &child : children)
+		{
+			auto childObject = get_object_by_id(child.id, objectPool);
+
+			if ((nullptr == childObject) ||
+			    (VirtualTerminalObjectType::Macro != childObject->get_object_type()))
+			{
+				anyWrongChildType = true;
+				break;
+			}
+		}
+		return (!anyWrongChildType);
+	}
+
+	bool ObjectLabelReferenceList::set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &returnedError)
+	{
+		returnedError = AttributeError::InvalidAttributeID;
+		return false;
+	}
+
+	bool ObjectLabelReferenceList::get_attribute(std::uint8_t attributeID, std::uint32_t &returnedAttributeData) const
+	{
+		bool retVal = false;
+
+		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
+		{
+			switch (static_cast<AttributeName>(attributeID))
+			{
+				case AttributeName::Type:
+				{
+					returnedAttributeData = static_cast<std::uint32_t>(get_object_type());
+					retVal = true;
+				}
+				break;
+
+				default:
+				{
+					// Do nothing return false
+				}
+				break;
+			}
+		}
+		return retVal;
+	}
+
+	void ObjectLabelReferenceList::add_label(std::uint16_t objectID, std::uint16_t stringVariableID, std::uint8_t fontType, std::uint16_t graphicObjectID)
+	{
+		labels.push_back({ objectID, stringVariableID, fontType, graphicObjectID });
+	}
+
+	std::uint16_t ObjectLabelReferenceList::get_number_of_labels() const
+	{
+		return static_cast<std::uint16_t>(labels.size());
+	}
+
+	bool ObjectLabelReferenceList::get_label(std::uint16_t objectID, ObjectLabel &returnedLabel) const
+	{
+		bool retVal = false;
+
+		for (const auto &label : labels)
+		{
+			if (objectID == label.objectID)
+			{
+				returnedLabel = label;
+				retVal = true;
+				break;
+			}
+		}
+		return retVal;
+	}
+
+	bool ObjectLabelReferenceList::set_label(std::uint16_t objectID, std::uint16_t stringVariableID, std::uint8_t fontType, std::uint16_t graphicObjectID)
+	{
+		bool retVal = false;
+
+		for (auto &label : labels)
+		{
+			if (objectID == label.objectID)
+			{
+				label.stringVariableID = stringVariableID;
+				label.fontType = fontType;
+				label.graphicObjectID = graphicObjectID;
+				retVal = true;
+				break;
+			}
+		}
+		return retVal;
+	}
+
+	bool ObjectLabelReferenceList::has_duplicate_labelled_objects() const
+	{
+		// The label count comes off the wire as a 16 bit field, so a pool may declare up to 65535
+		// labels. This runs on the pool-parse path, where a pairwise scan of that many entries would
+		// be billions of comparisons, so the IDs are sorted and adjacent equals looked for instead.
+		std::vector<std::uint16_t> labelledObjectIDs;
+
+		labelledObjectIDs.reserve(labels.size());
+
+		for (const auto &label : labels)
+		{
+			labelledObjectIDs.push_back(label.objectID);
+		}
+		std::sort(labelledObjectIDs.begin(), labelledObjectIDs.end());
+		return (labelledObjectIDs.end() != std::adjacent_find(labelledObjectIDs.begin(), labelledObjectIDs.end()));
 	}
 
 	VirtualTerminalObjectType WindowMask::get_object_type() const

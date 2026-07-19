@@ -4093,6 +4093,103 @@ namespace isobus
 		std::vector<std::uint8_t> colourMapData; ///< The actual colour map data, which remaps each index from the default table based on the size of this vector.
 	};
 
+	/// @brief Defines an object label reference list object. The Object Label Reference List object, available in VT version 4
+	/// and later, associates a label with objects in the object pool. A label is a string, a graphic representation, or both.
+	/// An object pool contains at most one Object Label Reference List object, and an object is labelled at most once.
+	/// Labels are intended for the VT's own proprietary screens, popup messages and editors rather than for the object pool's
+	/// own masks.
+	class ObjectLabelReferenceList : public VTObject
+	{
+	public:
+		/// @brief Enumerates this object's attributes which are assigned an attribute ID.
+		/// The Change Attribute command allows any writable attribute with an AID to be changed.
+		enum class AttributeName : std::uint8_t
+		{
+			Type = 0,
+
+			NumberOfAttributes = 1
+		};
+
+		/// @brief One entry of the label list: the object being labelled and the label itself.
+		struct ObjectLabel
+		{
+			std::uint16_t objectID; ///< Object ID of the object being labelled
+			std::uint16_t stringVariableID; ///< String Variable holding the label text, or NULL_OBJECT_ID
+			std::uint8_t fontType; ///< Font type for the label string
+			std::uint16_t graphicObjectID; ///< Object drawn as the label's designator, or NULL_OBJECT_ID
+		};
+
+		/// @brief Constructor for an object label reference list object
+		ObjectLabelReferenceList() = default;
+
+		/// @brief Virtual destructor for an object label reference list object
+		~ObjectLabelReferenceList() override = default;
+
+		/// @brief Returns the VT object type of the underlying derived object
+		/// @returns The VT object type of the underlying derived object
+		VirtualTerminalObjectType get_object_type() const override;
+
+		/// @brief Returns the minimum binary serialized length of the associated object
+		/// @returns The minimum binary serialized length of the associated object
+		std::uint32_t get_minumum_object_length() const override;
+
+		/// @brief Performs basic error checking on the object and returns if the object is valid
+		/// @param[in] objectPool The object pool to use when validating the object
+		/// @returns `true` if the object passed basic error checks
+		bool get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool) const override;
+
+		/// @brief Sets an attribute and optionally returns an error code in the last parameter
+		/// @param[in] attributeID The ID of the attribute to change
+		/// @param[in] rawAttributeData The raw data to change the attribute to, as decoded in little endian format with unused
+		/// bytes/bits set to zero.
+		/// @param[in] objectPool The object pool to use when validating the objects affected by setting this attribute
+		/// @param[out] returnedError If this function returns false, this will be the error code. If the function
+		/// returns true, this value is undefined.
+		/// @returns True if the attribute was changed, otherwise false (check the returnedError in this case to know why).
+		bool set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool, AttributeError &returnedError) override;
+
+		/// @brief Gets an attribute and returns the raw data in the last parameter
+		/// @param[in] attributeID The ID of the attribute to get
+		/// @param[out] returnedAttributeData The raw data of the attribute, as decoded in little endian format with unused
+		/// bytes/bits set to zero. You may need to cast this to the correct type. If this function
+		/// returns false, this value is undefined.
+		/// @returns True if the attribute was retrieved, otherwise false (the attribute ID was invalid)
+		bool get_attribute(std::uint8_t attributeID, std::uint32_t &returnedAttributeData) const override;
+
+		/// @brief Appends a label to the list. Does not check whether the object is already labelled.
+		/// @param[in] objectID The object ID of the object being labelled
+		/// @param[in] stringVariableID The object ID of a String Variable holding the label string, or NULL_OBJECT_ID for no text
+		/// @param[in] fontType The font type used to render the label string
+		/// @param[in] graphicObjectID The object ID of an object used as the label's graphic representation, or NULL_OBJECT_ID for no designator
+		void add_label(std::uint16_t objectID, std::uint16_t stringVariableID, std::uint8_t fontType, std::uint16_t graphicObjectID);
+
+		/// @brief Returns the number of labels in this list
+		/// @returns The number of labels in this list
+		std::uint16_t get_number_of_labels() const;
+
+		/// @brief Returns the label associated with an object, looked up by the object that is labelled
+		/// @param[in] objectID The object ID of the labelled object to look up
+		/// @param[out] returnedLabel The label associated with that object. Undefined if this function returns false.
+		/// @returns True if the object has a label in this list, otherwise false
+		bool get_label(std::uint16_t objectID, ObjectLabel &returnedLabel) const;
+
+		/// @brief Updates the label associated with an object. Does not add a label for an object that has none.
+		/// @param[in] objectID The object ID of the labelled object to update
+		/// @param[in] stringVariableID The object ID of a String Variable holding the label string, or NULL_OBJECT_ID for no text
+		/// @param[in] fontType The font type used to render the label string
+		/// @param[in] graphicObjectID The object ID of an object used as the label's graphic representation, or NULL_OBJECT_ID for no designator
+		/// @returns True if the label was updated, otherwise false (the object has no label in this list)
+		bool set_label(std::uint16_t objectID, std::uint16_t stringVariableID, std::uint8_t fontType, std::uint16_t graphicObjectID);
+
+		/// @brief Returns whether any object ID appears more than once in this list, which an object pool is not allowed to do
+		/// @returns True if some object is labelled more than once, otherwise false
+		bool has_duplicate_labelled_objects() const;
+
+	private:
+		static constexpr std::uint32_t MIN_OBJECT_LENGTH = 5; ///< The fewest bytes of IOP data that can represent this object
+		std::vector<ObjectLabel> labels; ///< The labels this list associates with objects, one entry per labelled object
+	};
+
 	/// @brief Defines a window mask object
 	class WindowMask : public VTObject
 	{

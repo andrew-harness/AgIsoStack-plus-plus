@@ -1947,7 +1947,73 @@ namespace isobus
 
 				case VirtualTerminalObjectType::ObjectLabelRefrenceList:
 				{
-					retVal = parse_unsupported_object(decodedType, decodedID, iopData, iopLength);
+					auto tempObject = std::make_shared<ObjectLabelReferenceList>();
+
+					if (iopLength >= tempObject->get_minumum_object_length())
+					{
+						tempObject->set_id(decodedID);
+
+						const std::uint16_t numberOfLabels = get_little_endian_uint16(iopData, 3);
+						iopLength -= 5;
+						iopData += 5;
+
+						// Table B.64: one labeled object consumes 7 bytes.
+						if (iopLength >= (static_cast<std::uint32_t>(numberOfLabels) * 7u))
+						{
+							for (std::uint_fast16_t i = 0; i < numberOfLabels; i++)
+							{
+								tempObject->add_label(get_little_endian_uint16(iopData, 0),
+								                      get_little_endian_uint16(iopData, 2),
+								                      iopData[4],
+								                      get_little_endian_uint16(iopData, 5));
+								iopLength -= 7;
+								iopData += 7;
+							}
+							retVal = true;
+						}
+						else
+						{
+							LOG_ERROR("[WS]: Not enough IOP data to parse object label reference list labels for object " + isobus::to_string(static_cast<int>(decodedID)));
+						}
+					}
+					else
+					{
+						LOG_ERROR("[WS]: Not enough IOP data to parse object label reference list object");
+					}
+
+					if (retVal && tempObject->has_duplicate_labelled_objects())
+					{
+						// B.21: it is not possible to assign more than one label to an object, and a pool
+						// whose list names an object more than once shall be rejected. This is enforced
+						// here rather than in get_is_valid because nothing in the library calls
+						// get_is_valid -- the parse path is the only place a pool is ever refused.
+						LOG_ERROR("[WS]: Object label reference list " + isobus::to_string(static_cast<int>(decodedID)) + " labels an object more than once");
+						retVal = false;
+					}
+
+					if (retVal)
+					{
+						// Table B.64: an object pool shall not contain more than one Object Label Reference
+						// List object. An object of this type already carrying the ID being parsed is the
+						// same object arriving again in a run-time object pool update, which replaces it
+						// rather than adding a second one.
+						for (const auto &existingObject : vtObjectTree)
+						{
+							if ((nullptr != existingObject.second) &&
+							    (VirtualTerminalObjectType::ObjectLabelRefrenceList == existingObject.second->get_object_type()) &&
+							    (decodedID != existingObject.first))
+							{
+								LOG_ERROR("[WS]: An object pool may contain only one object label reference list object, but object " + isobus::to_string(static_cast<int>(decodedID)) + " is a second one");
+								retVal = false;
+								break;
+							}
+						}
+					}
+
+					if (retVal)
+					{
+						retVal = add_or_replace_object(tempObject);
+					}
 				}
 				break;
 
@@ -2599,19 +2665,6 @@ namespace isobus
 			{
 				// Table B.70: fixed 9-byte record (see ExternalObjectPointer::get_minumum_object_length).
 				objectLength = 9;
-			}
-			break;
-
-			case VirtualTerminalObjectType::ObjectLabelRefrenceList:
-			{
-				// Table B.64: 5-byte header then a 2-byte count of labeled objects, each of
-				// which consumes 7 bytes.
-				if (iopLength < 5)
-				{
-					LOG_ERROR("[WS]: Not enough IOP data to parse object label reference list " + isobus::to_string(static_cast<int>(decodedID)));
-					return false;
-				}
-				objectLength = 5u + (static_cast<std::uint32_t>(get_little_endian_uint16(iopData, 3)) * 7u);
 			}
 			break;
 

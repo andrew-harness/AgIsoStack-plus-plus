@@ -2538,6 +2538,98 @@ namespace isobus
 			}
 			break;
 
+			case Function::ChangeObjectLabelCommand:
+			{
+				const std::uint16_t objectID = get_little_endian_uint16(data, 1);
+				const std::uint16_t stringVariableID = get_little_endian_uint16(data, 3);
+				const std::uint8_t fontType = data[5];
+				const std::uint16_t graphicObjectID = get_little_endian_uint16(data, 6);
+
+				// F.51's byte 2 is a bitfield rather than a single error code, so every problem the command
+				// has is accumulated and reported at once instead of returning on the first one found.
+				std::uint8_t errorBitfield = 0;
+
+				// Every lookup here goes through the const object tree rather than get_object_by_id, which
+				// is std::map::operator[] and default-inserts a null entry on a miss. This command carries
+				// three object IDs a working set may get wrong, so looking them up the other way would
+				// leave a phantom entry in the pool for each one.
+				const auto &objectTree = managedWorkingSet->get_object_tree();
+
+				auto find_object = [&objectTree](std::uint16_t idToFind) -> std::shared_ptr<VTObject> {
+					auto foundObject = objectTree.find(idToFind);
+					return ((objectTree.end() == foundObject) ? nullptr : foundObject->second);
+				};
+
+				std::shared_ptr<ObjectLabelReferenceList> labelReferenceList;
+
+				for (const auto &currentObject : objectTree)
+				{
+					if ((nullptr != currentObject.second) &&
+					    (VirtualTerminalObjectType::ObjectLabelRefrenceList == currentObject.second->get_object_type()))
+					{
+						labelReferenceList = std::static_pointer_cast<ObjectLabelReferenceList>(currentObject.second);
+						break;
+					}
+				}
+
+				if (nullptr == labelReferenceList)
+				{
+					errorBitfield |= get_bit(static_cast<std::uint8_t>(ChangeObjectLabelErrorBit::NoObjectLabelReferenceListInPool));
+				}
+
+				// F.50 names an object to associate a label with, so the object has to exist and the list
+				// has to already carry an entry for it. A pool with no list at all is reported by bit 3
+				// alone: the object ID it names is not made invalid by the list being absent.
+				ObjectLabelReferenceList::ObjectLabel existingLabel{};
+
+				if ((nullptr == find_object(objectID)) ||
+				    ((nullptr != labelReferenceList) && (!labelReferenceList->get_label(objectID, existingLabel))))
+				{
+					errorBitfield |= get_bit(static_cast<std::uint8_t>(ChangeObjectLabelErrorBit::InvalidObjectID));
+				}
+
+				if (NULL_OBJECT_ID != stringVariableID)
+				{
+					auto stringVariableObject = find_object(stringVariableID);
+
+					if ((nullptr == stringVariableObject) ||
+					    (VirtualTerminalObjectType::StringVariable != stringVariableObject->get_object_type()))
+					{
+						errorBitfield |= get_bit(static_cast<std::uint8_t>(ChangeObjectLabelErrorBit::InvalidStringVariableObjectID));
+					}
+
+					// F.50 ignores the font type when the String Variable reference is NULL, so it is only
+					// checked when a string was supplied. The accepted values are the ones the object pool
+					// parser accepts for a Font Attributes object.
+					if ((fontType > static_cast<std::uint8_t>(FontAttributes::FontType::ISO8859_7)) ||
+					    (fontType == static_cast<std::uint8_t>(FontAttributes::FontType::Reserved_1)) ||
+					    (fontType == static_cast<std::uint8_t>(FontAttributes::FontType::Reserved_2)))
+					{
+						errorBitfield |= get_bit(static_cast<std::uint8_t>(ChangeObjectLabelErrorBit::InvalidFontType));
+					}
+				}
+
+				if ((NULL_OBJECT_ID != graphicObjectID) &&
+				    (nullptr == find_object(graphicObjectID)))
+				{
+					errorBitfield |= get_bit(static_cast<std::uint8_t>(ChangeObjectLabelErrorBit::DesignatorReferencesInvalidObjects));
+				}
+
+				if (0 == errorBitfield)
+				{
+					labelReferenceList->set_label(objectID, stringVariableID, fontType, graphicObjectID);
+					send_change_object_label_response(0, managedWorkingSet->get_control_function());
+					dispatch_repaint(managedWorkingSet);
+					LOG_DEBUG("[VT Server]: Client %u change object label command: Object: %u, String Variable: %u, Font: %u, Graphic: %u", managedWorkingSet->get_control_function()->get_address(), objectID, stringVariableID, fontType, graphicObjectID);
+				}
+				else
+				{
+					send_change_object_label_response(errorBitfield, managedWorkingSet->get_control_function());
+					LOG_WARNING("[VT Server]: Client %u change object label command for object %u was rejected with an error bitfield of %u", managedWorkingSet->get_control_function()->get_address(), objectID, errorBitfield);
+				}
+			}
+			break;
+
 			case Function::ControlAudioSignalCommand:
 			{
 				send_audio_signal_successful(message.get_source_control_function());
@@ -3532,6 +3624,30 @@ namespace isobus
 			{
 				retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
 			}
+		}
+		return retVal;
+	}
+
+	bool VirtualTerminalServer::send_change_object_label_response(std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			// F.51 puts the error bitfield in byte 2 and reserves bytes 3-8. There is no object ID echo,
+			// which every other change command response in the set has.
+			const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer{
+				static_cast<std::uint8_t>(Function::ChangeObjectLabelCommand),
+				errorBitfield,
+				0xFF,
+				0xFF,
+				0xFF,
+				0xFF,
+				0xFF,
+				0xFF
+			};
+
+			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
 		}
 		return retVal;
 	}

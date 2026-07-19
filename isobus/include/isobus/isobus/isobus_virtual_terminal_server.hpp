@@ -529,6 +529,17 @@ namespace isobus
 			AnyOtherError = 7
 		};
 
+		/// @brief Enumerates the bit indices of the error fields that can be set in a change object label response
+		enum class ChangeObjectLabelErrorBit : std::uint8_t
+		{
+			InvalidObjectID = 0,
+			InvalidStringVariableObjectID = 1,
+			InvalidFontType = 2,
+			NoObjectLabelReferenceListInPool = 3,
+			DesignatorReferencesInvalidObjects = 4,
+			AnyOtherError = 5
+		};
+
 		/// @brief Enumerates the bit indices of the error fields that can be set in a delete object pool response
 		enum class DeleteObjectPoolErrorBit : std::uint8_t
 		{
@@ -884,6 +895,13 @@ namespace isobus
 		/// @param[in] destination The control function to send the message to
 		/// @returns true if the message was sent, otherwise false
 		bool send_lock_unlock_mask_response(std::uint8_t command, std::uint8_t errorBitfield, bool unsolicited, std::shared_ptr<ControlFunction> destination) const;
+
+		/// @brief Sends a response to a change object label command. Unlike the other change command
+		/// responses, F.51 carries no object ID echo: byte 2 is the error bitfield and bytes 3-8 are reserved.
+		/// @param[in] errorBitfield An error bitfield
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false
+		bool send_change_object_label_response(std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends a response to a change size command
 		/// @param[in] objectID The object ID for the object whose size was meant to be changed
