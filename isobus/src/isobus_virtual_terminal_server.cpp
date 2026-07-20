@@ -916,24 +916,42 @@ namespace isobus
 				auto loadedVersion = load_version(versionLabel, message.get_source_control_function()->get_NAME());
 				if (!loadedVersion.empty())
 				{
-					managedWorkingSet->set_iop_size(static_cast<std::uint32_t>(loadedVersion.size()));
-					managedWorkingSet->add_iop_raw_data(loadedVersion);
-
-					// A parse belongs to a load that produced something to parse. Started outside this
-					// branch it would also run when no version was found -- on a working set that still
-					// holds an earlier pool, a parse of zero new chunks that succeeds and sends a second,
-					// contradicting response saying the version loaded.
-					//
-					// The two flags select the message that completes this parse, so they describe a
-					// parse this call actually started and nothing else. Set after a start that did not
-					// happen, they would redirect the completion of whatever parse is already
-					// outstanding, answering a client waiting on an End of Object Pool response with an
-					// Extended Load Version response instead.
-					if (managedWorkingSet->start_parsing_thread())
+					// E.6: "If an object pool is already loaded it is overwritten." Returning the working
+					// set to its pre-upload state before loading makes the stored version parse into a
+					// clean tree that replaces the current pool, rather than the parse worker merging it
+					// into the live tree (merging is correct only for a runtime pool update, C.2.6). The
+					// reset also discards the state derived from the pool being replaced -- the mask lock,
+					// the Colour Map selection, the alarm activation sequence, open-for-input and focus --
+					// which the new pool's parse repopulates. Nothing between here and that parse reads
+					// them. The reset fails only while a parse is outstanding, and the guard at the top of
+					// this case already returned in that state, so it cannot fail here; the false branch
+					// refuses the load rather than let add_iop_raw_data race a live parse worker.
+					if (managedWorkingSet->reset_object_pool())
 					{
-						managedWorkingSet->set_was_object_pool_loaded_from_non_volatile_memory(true, {});
-						managedWorkingSet->set_loaded_via_extended_version_command(true, {});
-						LOG_DEBUG("[VT Server]: Starting parsing thread for loaded extended pool data.");
+						managedWorkingSet->set_iop_size(static_cast<std::uint32_t>(loadedVersion.size()));
+						managedWorkingSet->add_iop_raw_data(loadedVersion);
+
+						// A parse belongs to a load that produced something to parse. Started outside this
+						// branch it would also run when no version was found -- on a working set that still
+						// holds an earlier pool, a parse of zero new chunks that succeeds and sends a second,
+						// contradicting response saying the version loaded.
+						//
+						// The two flags select the message that completes this parse, so they describe a
+						// parse this call actually started and nothing else. Set after a start that did not
+						// happen, they would redirect the completion of whatever parse is already
+						// outstanding, answering a client waiting on an End of Object Pool response with an
+						// Extended Load Version response instead.
+						if (managedWorkingSet->start_parsing_thread())
+						{
+							managedWorkingSet->set_was_object_pool_loaded_from_non_volatile_memory(true, {});
+							managedWorkingSet->set_loaded_via_extended_version_command(true, {});
+							LOG_DEBUG("[VT Server]: Starting parsing thread for loaded extended pool data.");
+						}
+					}
+					else
+					{
+						send_extended_load_version_response(get_bit(static_cast<std::uint8_t>(LoadVersionErrorBit::AnyOtherError)), managedWorkingSet->get_control_function());
+						LOG_ERROR("[VT Server]: Could not reset the object pool before an Extended Load Version; a parse is unexpectedly outstanding. Refusing the load.");
 					}
 				}
 				else
@@ -983,15 +1001,33 @@ namespace isobus
 				auto loadedVersion = load_version(versionLabel, message.get_source_control_function()->get_NAME());
 				if (!loadedVersion.empty())
 				{
-					managedWorkingSet->set_iop_size(static_cast<std::uint32_t>(loadedVersion.size()));
-					managedWorkingSet->add_iop_raw_data(loadedVersion);
-
-					// Inside the success branch, and the flag set only when a worker actually started.
-					// See the extended path above for what each of those prevents.
-					if (managedWorkingSet->start_parsing_thread())
+					// E.6: "If an object pool is already loaded it is overwritten." Returning the working
+					// set to its pre-upload state before loading makes the stored version parse into a
+					// clean tree that replaces the current pool, rather than the parse worker merging it
+					// into the live tree (merging is correct only for a runtime pool update, C.2.6). The
+					// reset also discards the state derived from the pool being replaced -- the mask lock,
+					// the Colour Map selection, the alarm activation sequence, open-for-input and focus --
+					// which the new pool's parse repopulates. Nothing between here and that parse reads
+					// them. The reset fails only while a parse is outstanding, and the guard at the top of
+					// this case already returned in that state, so it cannot fail here; the false branch
+					// refuses the load rather than let add_iop_raw_data race a live parse worker.
+					if (managedWorkingSet->reset_object_pool())
 					{
-						managedWorkingSet->set_was_object_pool_loaded_from_non_volatile_memory(true, {});
-						LOG_DEBUG("[VT Server]: Starting parsing thread for loaded pool data.");
+						managedWorkingSet->set_iop_size(static_cast<std::uint32_t>(loadedVersion.size()));
+						managedWorkingSet->add_iop_raw_data(loadedVersion);
+
+						// The flag is set only when a worker actually started. See the extended path above
+						// for what that prevents.
+						if (managedWorkingSet->start_parsing_thread())
+						{
+							managedWorkingSet->set_was_object_pool_loaded_from_non_volatile_memory(true, {});
+							LOG_DEBUG("[VT Server]: Starting parsing thread for loaded pool data.");
+						}
+					}
+					else
+					{
+						send_load_version_response(get_bit(static_cast<std::uint8_t>(LoadVersionErrorBit::AnyOtherError)), managedWorkingSet->get_control_function());
+						LOG_ERROR("[VT Server]: Could not reset the object pool before a Load Version; a parse is unexpectedly outstanding. Refusing the load.");
 					}
 				}
 				else
