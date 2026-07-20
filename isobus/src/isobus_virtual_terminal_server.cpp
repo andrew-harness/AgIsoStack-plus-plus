@@ -2419,24 +2419,37 @@ namespace isobus
 			case Function::DeleteObjectPoolCommand:
 			{
 				LOG_INFO("[VT Server]: Client %u requests deletion of object pool from volatile memory.", managedWorkingSet->get_control_function()->get_address());
-				if (delete_object_pool(managedWorkingSet->get_control_function()->get_NAME()))
+
+				// The parse worker owns the staging tree while it runs, so a pool cannot be deleted out
+				// from under one. This is checked before the pool is deactivated so that a refusal leaves
+				// the working set exactly as it was rather than deactivating a pool it then declines to
+				// delete. F.45 bit 0 is the answer for it, and a client only reaches this by sending
+				// Delete Object Pool before the End of Object Pool response its upload is still waiting
+				// on; it may simply ask again.
+				if (managedWorkingSet->is_object_pool_parse_outstanding())
 				{
-					LOG_INFO("[VT Server]: Client %u object pool has been deactivated.", managedWorkingSet->get_control_function()->get_address());
-
-					// Deactivating the pool ends any input it had open, so ESC must not go on reporting
-					// a field of the deleted pool as open and running its macros.
-					managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
-
-					// The deleted pool declared whatever mask was locked, so the lock goes with it and no
-					// later repaint may be withheld on its account. No unsolicited response accompanies
-					// this: F.46 requires one only for the timeout and mask-hidden releases, and the client
-					// asked for this deletion and is answered by the Delete Object Pool response below.
-					managedWorkingSet->set_mask_lock(NULL_OBJECT_ID, 0, 0, {});
+					LOG_WARNING("[VT Server]: Client %u object pool cannot be deleted while its object pool is being parsed.", managedWorkingSet->get_control_function()->get_address());
+					send_delete_object_pool_response(get_bit(static_cast<std::uint8_t>(DeleteObjectPoolErrorBit::DeletionError)), message.get_source_control_function());
+				}
+				else if (delete_object_pool(managedWorkingSet->get_control_function()->get_NAME()) &&
+				         managedWorkingSet->reset_object_pool())
+				{
+					// The pool is deactivated by the server implementation above and erased from volatile
+					// storage here. ISO 11783-6 F.44 is a deletion, not a deactivation: the parsed objects
+					// and the raw IOP bytes both go, and with them everything the working set derived from
+					// the pool. The working set itself stays connected and may upload a new pool at once.
+					LOG_INFO("[VT Server]: Client %u object pool has been deleted from volatile memory.", managedWorkingSet->get_control_function()->get_address());
 					send_delete_object_pool_response(0, message.get_source_control_function());
+
+					// The screen is not left blank because the working set holding it deleted its pool.
+					// A working set with no pool resolves no active mask and so cannot be selected, which
+					// makes this hand the display to whichever survivor 4.6.14 ranks highest. Without it
+					// the screen stays blank until some other working set happens to change its mask.
+					apply_active_working_set_arbitration();
 				}
 				else
 				{
-					LOG_ERROR("[VT Server]: Client %u object pool failed to be deactivated.", managedWorkingSet->get_control_function()->get_address());
+					LOG_ERROR("[VT Server]: Client %u object pool failed to be deleted.", managedWorkingSet->get_control_function()->get_address());
 					send_delete_object_pool_response(get_bit(static_cast<std::uint8_t>(DeleteObjectPoolErrorBit::DeletionError)), message.get_source_control_function());
 				}
 			}

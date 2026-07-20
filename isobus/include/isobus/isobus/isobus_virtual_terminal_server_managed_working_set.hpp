@@ -60,6 +60,36 @@ namespace isobus
 		/// @returns true if at least 1 object pool has been received for this working set master, otherwise false
 		bool get_any_object_pools() const;
 
+		/// @brief Returns whether a pool parse worker exists for this working set
+		/// @details True from start_parsing_thread() until join_parsing_thread(). That spans more than
+		/// the Running state: it also covers the moment after the thread is spawned but before the
+		/// worker has recorded Running, and the settled Success and Fail states, whose thread has
+		/// finished but has not been joined and whose response to the client is still owed. The thread
+		/// handle is the authoritative test because it is written only on the CAN thread, whereas the
+		/// processing state is written by the worker.
+		/// @returns True while a pool parse worker is outstanding, otherwise false
+		bool is_object_pool_parse_outstanding() const;
+
+		/// @brief Deletes this working set's object pool from volatile storage, returning the working
+		/// set to the state it was in before any pool was uploaded (ISO 11783-6 F.44)
+		/// @details Discards the parsed objects and the raw IOP bytes, and clears the server-side state
+		/// that is derived from the pool: the object open for operator input, the mask lock, the Colour
+		/// Map selection, the focused object, the alarm activation sequence, the record of how the pool
+		/// was obtained, and the pool processing state.
+		///
+		/// What describes the CONNECTION survives, because F.44 deletes a pool and not a working set --
+		/// the client stays connected and may upload a new pool immediately. So the associated control
+		/// function, the working set and auxiliary input maintenance timestamps that clause 4.6.9 times
+		/// out against, the VT version the master reported in Working Set Maintenance, the retained
+		/// callback handles, and any pending teardown request are all left alone.
+		///
+		/// Refused while a pool parse worker is outstanding: the worker owns the staging tree while it
+		/// parses, and clearing it underneath would be a data race. Joining the worker here is not an
+		/// option because this runs on the CAN thread and a parse can take seconds.
+		/// @returns True if the object pool was deleted, false if a pool parse is outstanding and the
+		/// pool was therefore left alone
+		bool reset_object_pool();
+
 		/// @brief Returns the state of object pool processing, useful when parsing the object pool
 		/// on its own thread.
 		/// @returns The state of object pool processing

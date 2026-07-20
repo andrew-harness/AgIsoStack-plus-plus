@@ -131,6 +131,38 @@ namespace isobus
 		}
 	}
 
+	void VirtualTerminalWorkingSetBase::reset_object_pool_storage()
+	{
+		vtObjectTree.clear();
+		clear_published_object_tree();
+
+		// Destroying each chunk is what frees the pool bytes; dropping the outer array as well leaves
+		// nothing of the pool behind.
+		iopFilesRawData.clear();
+		iopFilesRawData.shrink_to_fit();
+
+		// The parse cursor into iopFilesRawData. Left non-zero against an emptied buffer, every chunk
+		// of the next pool would sit below it and the merge parse would skip all of them.
+		parsedIopFileCount = 0;
+
+		// Names the Working Set object of the deleted pool. Left set, the working-set parse of the next
+		// pool resolves it against an empty tree, finds nothing, and refuses the new Working Set object.
+		workingSetID = NULL_OBJECT_ID;
+
+		{
+			// iopSize and transferredIopSize are written under this mutex because set_iop_size() writes
+			// them under it, and faultingObjectID because set_object_pool_faulting_object_id() does.
+			const std::lock_guard<std::mutex> lock(managedWorkingSetMutex);
+
+			// A transfer declares its own budget in its Get Memory message (Annex D.3). Zero is the "no
+			// budget declared" value that is_object_pool_within_declared_iop_size() reads as unbounded,
+			// so the deleted pool's budget cannot bound the next one.
+			iopSize = 0;
+			transferredIopSize = 0;
+			faultingObjectID = NULL_OBJECT_ID;
+		}
+	}
+
 	void VirtualTerminalWorkingSetBase::clear_published_object_tree()
 	{
 		auto snapshot = std::make_shared<const ObjectTree>();

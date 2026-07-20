@@ -102,6 +102,23 @@ namespace isobus
 		bool is_object_pool_within_declared_iop_size() const;
 
 	protected:
+		/// @brief Returns the object pool storage this class owns to its pre-upload state
+		/// @details Discards the parsed objects -- the staging tree and the published snapshot alike --
+		/// together with the raw IOP bytes they were parsed from, the count of chunks already parsed,
+		/// the working set object's ID, the faulting object ID and the transfer sizes. Every one of
+		/// those is derived from the object pool, so it goes when the pool does. Releasing the raw
+		/// bytes is the substance of ISO 11783-6 F.44: they are the largest thing a working set holds
+		/// and are retained for nothing once the pool is deleted.
+		///
+		/// The connection is untouched: this deletes a pool, not a working set, and the client may
+		/// upload a new pool immediately. Of this class's remaining members, the two mutexes are
+		/// synchronization rather than state, and the colour table holds the constructor's default
+		/// palette and is never written from a pool, so none of them is pool-derived.
+		///
+		/// The caller must ensure no pool parse worker is outstanding, because this writes the staging
+		/// tree, which that worker owns exclusively for the duration of a parse.
+		void reset_object_pool_storage();
+
 		/// @brief Publishes an empty object tree, so readers see no pool at all
 		/// @details Holds the invariant that the published tree is non-empty only for a pool that
 		/// parsed through to completion. The staging tree is left as it is, so a pool whose parse

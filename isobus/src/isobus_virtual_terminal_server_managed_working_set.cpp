@@ -57,6 +57,61 @@ namespace isobus
 		return (!iopFilesRawData.empty());
 	}
 
+	bool VirtualTerminalServerManagedWorkingSet::is_object_pool_parse_outstanding() const
+	{
+		return (nullptr != objectPoolProcessingThread);
+	}
+
+	bool VirtualTerminalServerManagedWorkingSet::reset_object_pool()
+	{
+		bool retVal = false;
+
+		if (!is_object_pool_parse_outstanding())
+		{
+			reset_object_pool_storage();
+
+			// Deleting the pool ends any input it had open, so ESC must not go on reporting a field of
+			// the deleted pool as open and running its macros.
+			objectOpenForInput = NULL_OBJECT_ID;
+			focusedObject = NULL_OBJECT_ID;
+
+			// The deleted pool declared whatever mask was locked, and F.46 lists "The pool is deleted"
+			// among the mechanisms that release a lock, so no later repaint may be withheld on its
+			// account. No unsolicited Lock/Unlock Mask Response accompanies this. F.46 does say
+			// generally that "when one of the unlock mechanisms occurs, a response message is sent",
+			// but its "shall" for an unsolicited response names only the timeout and the mask going
+			// hidden, and it requires "appropriate error codes set" -- of which there is none for a
+			// deleted pool. The client asked for this deletion and is answered by the F.45 response.
+			maskLockObjectID = NULL_OBJECT_ID;
+			maskLockTimeout_ms = 0;
+			maskLockTimestamp_ms = 0;
+
+			// The Colour Map selected by Select Colour Map (F.60) was an object of the deleted pool.
+			// NULL_OBJECT_ID is the default palette, which is what a pool-less working set uses.
+			activeColourMapObjectId = NULL_OBJECT_ID;
+
+			// A non-zero sequence says an Alarm Mask of this working set is asserted, and the mask went
+			// with the pool. It matters beyond tidiness: stamp_alarm_activation_sequences() re-stamps
+			// only a working set whose sequence is zero, so a stale value would order a later pool's
+			// first alarm as though it had been raised at the deleted pool's activation time and let it
+			// win the clause 4.6.14 chronological tie-break against alarms raised in between.
+			alarmActivationSequence = 0;
+
+			// These select the message that completes the NEXT parse (a Load Version response rather
+			// than an End of Object Pool response, and the extended variant of it). They describe the
+			// pool that was just deleted, so a new upload must not inherit them.
+			wasLoadedFromNonVolatileMemory = false;
+			loadedViaExtendedVersionCommand = false;
+
+			// None, not Joined: no parse has been run for the pool this working set now holds, which is
+			// no pool at all. start_parsing_thread() keys off the thread handle rather than this state,
+			// so a later upload still parses.
+			set_object_pool_processing_state(ObjectPoolProcessingThreadState::None);
+			retVal = true;
+		}
+		return retVal;
+	}
+
 	VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState VirtualTerminalServerManagedWorkingSet::get_object_pool_processing_state()
 	{
 		const std::lock_guard<std::mutex> lock(managedWorkingSetMutex);
