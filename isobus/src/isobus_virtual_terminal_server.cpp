@@ -4766,8 +4766,13 @@ namespace isobus
 				// volatile memory -- including the pool as it existed prior to the update -- and
 				// suspends the working set. A parse failure on a working set that never became active
 				// is an initial-upload failure, which is left in place so the client can retry (only
-				// the error response is sent). get_bit(3) of the Object Pool Error Codes byte is the
-				// "object pool was deleted from volatile memory" flag, set only for the C.2.6 case.
+				// the error response is sent). C.2.5 byte 2 bit 0 (set here, since success is false)
+				// tells the client the error cause is in bytes 3 to 8, so the Object Pool Error Codes
+				// byte (byte 7) always carries bit 2, "any other error", as the cause: the parser
+				// records only a single faulting object ID with no failure category, so it cannot tell
+				// a missing object reference (bit 1) from any other malformed object, and bit 2 is the
+				// honest cause. get_bit(3), "object pool was deleted from volatile memory", is added
+				// only for the C.2.6 case, where the pool was in fact deleted.
 				// A runtime update reuses the same managed working set object that was stored in
 				// activeWorkingSet at activation, so a pointer comparison identifies it exactly; an
 				// address comparison would false-match a never-active working set whose control
@@ -4775,7 +4780,7 @@ namespace isobus
 				const bool poolWasActive = (ws == activeWorkingSet);
 
 				///  @todo Get the parent object ID of the faulting object
-				send_end_of_object_pool_response(false, NULL_OBJECT_ID, ws->get_object_pool_faulting_object_id(), poolWasActive ? get_bit(3) : 0, ws->get_control_function());
+				send_end_of_object_pool_response(false, NULL_OBJECT_ID, ws->get_object_pool_faulting_object_id(), static_cast<std::uint8_t>(get_bit(2) | (poolWasActive ? get_bit(3) : 0)), ws->get_control_function());
 
 				if (poolWasActive)
 				{
