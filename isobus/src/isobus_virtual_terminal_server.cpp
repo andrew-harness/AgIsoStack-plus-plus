@@ -1339,11 +1339,31 @@ namespace isobus
 			{
 				auto workingSetObjectId = get_little_endian_uint16(data, 1);
 				auto newActiveMaskObjectId = get_little_endian_uint16(data, 3);
-				auto workingSetObject = managedWorkingSet->get_object_by_id(workingSetObjectId);
+				// Both IDs resolve against ONE snapshot, so the mask that gets set belongs to the same
+				// object tree as the Working Set object it is set on. Resolving them separately would
+				// take two snapshots, which the parse worker can publish between.
+				const auto objectTree = managedWorkingSet->get_object_tree();
+				auto workingSetObject = VTObject::get_object_by_id(workingSetObjectId, *objectTree);
+				auto newActiveMaskObject = VTObject::get_object_by_id(newActiveMaskObjectId, *objectTree);
 
-				if (nullptr != workingSetObject)
+				// F.34 restricts this command to "the active mask of a Working Set" and to a new mask that is
+				// "either a Data Mask object or an Alarm Mask object", so both IDs are checked for type and not
+				// merely for existence. The Working Set check is what makes the downcast below defined: this
+				// build has RTTI off, so the cast is unchecked, and WorkingSet::set_active_mask writes a member
+				// that only WorkingSet declares. An object of any other type would be written past the storage
+				// it actually has.
+				const bool workingSetObjectIsValid = (nullptr != workingSetObject) &&
+				  (VirtualTerminalObjectType::WorkingSet == workingSetObject->get_object_type());
+				const bool newActiveMaskObjectIsValid = (nullptr != newActiveMaskObject) &&
+				  ((VirtualTerminalObjectType::DataMask == newActiveMaskObject->get_object_type()) ||
+				   (VirtualTerminalObjectType::AlarmMask == newActiveMaskObject->get_object_type()));
+
+				// Both IDs are validated before the first side effect, so a rejected command changes nothing:
+				// no active mask, no open-for-input field, no mask lock release, no arbitration and no event
+				// dispatch. Only the error response leaves the server.
+				if (workingSetObjectIsValid)
 				{
-					if (nullptr != managedWorkingSet->get_object_by_id(newActiveMaskObjectId))
+					if (newActiveMaskObjectIsValid)
 					{
 						std::static_pointer_cast<WorkingSet>(workingSetObject)->set_active_mask(newActiveMaskObjectId);
 
