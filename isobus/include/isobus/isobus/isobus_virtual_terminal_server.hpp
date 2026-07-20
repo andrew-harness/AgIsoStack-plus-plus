@@ -628,6 +628,18 @@ namespace isobus
 			AnyOtherError = 3
 		};
 
+		/// @brief Enumerates the bit indices of the error fields that can be set in a store version
+		/// response and in an extended store version response
+		/// @details ISO 11783-6 E.5 and E.13 define byte 6 of both responses identically. Bit 0 is
+		/// reserved, unlike the load version responses where bit 0 is a file system error.
+		enum class StoreVersionErrorBit : std::uint8_t
+		{
+			Reserved = 0,
+			VersionLabelNotCorrect = 1,
+			InsufficientMemoryAvailable = 2,
+			AnyOtherError = 3
+		};
+
 		/// @brief Enumerates the possible values of the Screen Capture command Item Requested field
 		enum class ScreenCaptureItem
 		{

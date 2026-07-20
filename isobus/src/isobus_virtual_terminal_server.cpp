@@ -812,7 +812,10 @@ namespace isobus
 					}
 					else
 					{
-						buffer[5] = 0x04; // Any other error
+						// E.13 byte 6 bit 3, "Any other error": the generic error for a save_version write
+						// failure, which is none of bit 1 (bad version label) or bit 2 (insufficient memory);
+						// bit 0 is reserved.
+						buffer[5] = get_bit(static_cast<std::uint8_t>(StoreVersionErrorBit::AnyOtherError));
 					}
 					buffer[6] = 0xFF; // Reserved
 					buffer[7] = 0xFF; // Reserved
@@ -962,7 +965,7 @@ namespace isobus
 						0xFF, // Reserved
 						0xFF, // Reserved
 						0xFF, // Reserved
-						0x01, // Error: the requested version is not available
+						get_bit(static_cast<std::uint8_t>(LoadVersionErrorBit::VersionLabelNotCorrectOrUnknown)), // E.15 byte 6 bit 1: requested version not in non-volatile storage
 						0xFF, // Reserved
 						0xFF // Reserved
 					};
@@ -1032,7 +1035,10 @@ namespace isobus
 				}
 				else
 				{
-					send_load_version_response(0x01, managedWorkingSet->get_control_function());
+					// E.7 byte 6 bit 1, "Version label is not correct or Version label unknown": the
+					// requested version is not in non-volatile storage. Bit 0 is the file system / pool
+					// corruption bit, which exists only in VT version 4 and later, so it is wrong here.
+					send_load_version_response(get_bit(static_cast<std::uint8_t>(LoadVersionErrorBit::VersionLabelNotCorrectOrUnknown)), managedWorkingSet->get_control_function());
 					LOG_ERROR("[VT Server]: Failed to load requested object pool version");
 				}
 			}
@@ -1087,7 +1093,10 @@ namespace isobus
 					}
 					else
 					{
-						buffer[5] = 0x04; // Any other error
+						// E.5 byte 6 bit 3, "Any other error": the generic error for a save_version write
+						// failure, which is none of bit 1 (bad version label) or bit 2 (insufficient memory);
+						// bit 0 is reserved.
+						buffer[5] = get_bit(static_cast<std::uint8_t>(StoreVersionErrorBit::AnyOtherError));
 					}
 					buffer[6] = 0xFF; // Reserved
 					buffer[7] = 0xFF; // Reserved
