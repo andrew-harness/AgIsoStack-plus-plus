@@ -259,6 +259,7 @@ namespace isobus
 		if (!is_object_pool_within_declared_iop_size())
 		{
 			LOG_ERROR("[WS]: Object pool transferred more than the declared memory; rejecting the pool.");
+			clear_published_object_tree();
 			set_object_pool_processing_state(ObjectPoolProcessingThreadState::Fail);
 			return;
 		}
@@ -291,17 +292,29 @@ namespace isobus
 			{
 				parsedIopFileCount = iopFilesRawData.size();
 				LOG_INFO("[WS]: Object pool successfully parsed.");
+
+				// The pool becomes visible to other threads here, once and as a whole -- every chunk of
+				// it is parsed, so no reader can catch it part-built. Publication precedes the state
+				// change, and must: a thread that observes Success is entitled to find the pool it
+				// announces already published.
+				publish_object_tree();
 				set_object_pool_processing_state(ObjectPoolProcessingThreadState::Success);
 			}
 			else
 			{
 				LOG_ERROR("[WS]: Object pool failed to be parsed.");
+				// A pool that did not parse is not valid to display, so nothing of it is published --
+				// including whatever a failed run-time update (ISO 11783-6 C.2.6) had already merged into
+				// the staging tree on top of the previous pool. The staging tree itself is kept, so an
+				// initial upload that failed can still be completed by transferring the rest of it.
+				clear_published_object_tree();
 				set_object_pool_processing_state(ObjectPoolProcessingThreadState::Fail);
 			}
 		}
 		else
 		{
 			LOG_ERROR("[WS]: Object pool failed to be parsed.");
+			clear_published_object_tree();
 			set_object_pool_processing_state(ObjectPoolProcessingThreadState::Fail);
 		}
 	}

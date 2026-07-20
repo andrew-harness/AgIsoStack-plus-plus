@@ -1678,7 +1678,12 @@ namespace isobus
 
 				if ((NULL_OBJECT_ID != objectID) && (nullptr != targetObject))
 				{
-					if (targetObject->set_attribute(attributeID, attributeData, managedWorkingSet->get_object_tree(), errorCode)) // 0 Is always the read-only "type" attribute
+					// The snapshot is held in a named local for the duration of the call that reads it,
+					// so the tree reference passed below outlives the call rather than dangling on a
+					// temporary that expired at the end of the argument list.
+					const auto objectTree = managedWorkingSet->get_object_tree();
+
+					if (targetObject->set_attribute(attributeID, attributeData, *objectTree, errorCode)) // 0 Is always the read-only "type" attribute
 					{
 						send_change_attribute_response(objectID, 0, data.at(3), message.get_source_control_function());
 						LOG_DEBUG("[VT Server]: Client %u changed object %u attribute %u to %u", managedWorkingSet->get_control_function()->get_address(), objectID, attributeID, attributeData);
@@ -1796,13 +1801,17 @@ namespace isobus
 
 				if (nullptr != targetObject)
 				{
+					// Named local rather than a temporary in the argument list, so the tree reference the
+					// change_list_item calls below take stays alive for the whole of each call.
+					const auto objectTree = managedWorkingSet->get_object_tree();
+
 					if ((NULL_OBJECT_ID == newObjectID) || (nullptr != newObject))
 					{
 						switch (targetObject->get_object_type())
 						{
 							case VirtualTerminalObjectType::InputList:
 							{
-								if (std::static_pointer_cast<InputList>(targetObject)->change_list_item(listIndex, newObjectID, managedWorkingSet->get_object_tree()))
+								if (std::static_pointer_cast<InputList>(targetObject)->change_list_item(listIndex, newObjectID, *objectTree))
 								{
 									send_change_list_item_response(objectID, newObjectID, 0, listIndex, message.get_source_control_function());
 									LOG_DEBUG("[VT Server]: Client %u change list item command: Object ID: %u, New Object ID: %u, Index: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newObjectID, listIndex);
@@ -1827,7 +1836,7 @@ namespace isobus
 
 							case VirtualTerminalObjectType::OutputList:
 							{
-								if (std::static_pointer_cast<OutputList>(targetObject)->change_list_item(listIndex, newObjectID, managedWorkingSet->get_object_tree()))
+								if (std::static_pointer_cast<OutputList>(targetObject)->change_list_item(listIndex, newObjectID, *objectTree))
 								{
 									send_change_list_item_response(objectID, newObjectID, 0, listIndex, message.get_source_control_function());
 									LOG_DEBUG("[VT Server]: Client %u change list item command: Object ID: %u, New Object ID: %u, Index: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newObjectID, listIndex);
@@ -1936,13 +1945,17 @@ namespace isobus
 
 				if (nullptr != targetMask)
 				{
+					// Named local rather than a temporary in the argument list, so the tree reference the
+					// change_soft_key_mask calls below take stays alive for the whole of each call.
+					const auto objectTree = managedWorkingSet->get_object_tree();
+
 					if ((NULL_OBJECT_ID == newSoftKeyMaskId) || (nullptr != newSoftKeyMask))
 					{
 						switch (targetMask->get_object_type())
 						{
 							case VirtualTerminalObjectType::AlarmMask:
 							{
-								if (std::static_pointer_cast<AlarmMask>(targetMask)->change_soft_key_mask(newSoftKeyMaskId, managedWorkingSet->get_object_tree()))
+								if (std::static_pointer_cast<AlarmMask>(targetMask)->change_soft_key_mask(newSoftKeyMaskId, *objectTree))
 								{
 									LOG_DEBUG("[VT Server]: Client %u change soft key mask command: alarm mask object %u to %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId, newSoftKeyMaskId);
 									send_change_soft_key_mask_response(dataOrAlarmMaskId, newSoftKeyMaskId, 0, message.get_source_control_function());
@@ -1967,7 +1980,7 @@ namespace isobus
 
 							case VirtualTerminalObjectType::DataMask:
 							{
-								if (std::static_pointer_cast<DataMask>(targetMask)->change_soft_key_mask(newSoftKeyMaskId, managedWorkingSet->get_object_tree()))
+								if (std::static_pointer_cast<DataMask>(targetMask)->change_soft_key_mask(newSoftKeyMaskId, *objectTree))
 								{
 									LOG_DEBUG("[VT Server]: Client %u change soft key mask command: data mask object %u to %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId, newSoftKeyMaskId);
 									send_change_soft_key_mask_response(dataOrAlarmMaskId, newSoftKeyMaskId, 0, message.get_source_control_function());
@@ -2677,20 +2690,20 @@ namespace isobus
 				// has is accumulated and reported at once instead of returning on the first one found.
 				std::uint8_t errorBitfield = 0;
 
-				// Every lookup here goes through the const object tree rather than get_object_by_id, which
-				// is std::map::operator[] and default-inserts a null entry on a miss. This command carries
-				// three object IDs a working set may get wrong, so looking them up the other way would
-				// leave a phantom entry in the pool for each one.
-				const auto &objectTree = managedWorkingSet->get_object_tree();
+				// Every lookup here goes through one snapshot of the object tree rather than repeated
+				// get_object_by_id calls. This command carries three object IDs a working set may get
+				// wrong, and taking them all from the same snapshot means they are all answered against
+				// the same pool even if a run-time pool update publishes a new one part-way through.
+				const auto objectTree = managedWorkingSet->get_object_tree();
 
 				auto find_object = [&objectTree](std::uint16_t idToFind) -> std::shared_ptr<VTObject> {
-					auto foundObject = objectTree.find(idToFind);
-					return ((objectTree.end() == foundObject) ? nullptr : foundObject->second);
+					auto foundObject = objectTree->find(idToFind);
+					return ((objectTree->end() == foundObject) ? nullptr : foundObject->second);
 				};
 
 				std::shared_ptr<ObjectLabelReferenceList> labelReferenceList;
 
-				for (const auto &currentObject : objectTree)
+				for (const auto &currentObject : *objectTree)
 				{
 					if ((nullptr != currentObject.second) &&
 					    (VirtualTerminalObjectType::ObjectLabelRefrenceList == currentObject.second->get_object_type()))
@@ -3005,7 +3018,11 @@ namespace isobus
 					}
 
 					std::vector<SetInfo> sets;
-					for (const auto &treeEntry : ws->get_object_tree())
+					// The snapshot is a named local because a range-for does not extend the lifetime of a
+					// temporary the range expression was dereferenced from: iterating *ws->get_object_tree()
+					// directly would walk a tree whose last owner died at the end of the range expression.
+					const auto objectTree = ws->get_object_tree();
+					for (const auto &treeEntry : *objectTree)
 					{
 						const auto &object = treeEntry.second;
 						if ((nullptr == object) || (targetObjectType != object->get_object_type()))
@@ -4152,13 +4169,15 @@ namespace isobus
 	{
 		std::shared_ptr<VTObject> retVal;
 
-		// This reads working sets other than the one being served, so it must not touch their object
-		// trees through get_object_by_id: that is std::map::operator[], which default-inserts on a
-		// miss. Inserting here would both pollute another client's tree with a phantom entry and race
-		// its pool-parsing worker thread, which writes the same map. Look up through the const tree
-		// instead, and report no mask for a working set whose pool is still being parsed -- a half-built
-		// tree cannot meaningfully answer and is being written from another thread. A pool whose parse
-		// failed reports no mask either: it is not valid to display, and until the client re-uploads or
+		// This reads working sets other than the one being served, and both lookups it makes come from a
+		// single snapshot, so the mask it reports is the one the Working Set object it read actually
+		// names.
+		//
+		// The Running and Fail states are refused as a matter of policy, not of safety. Reading either
+		// would be safe -- the snapshot is immutable and, during a run-time pool update, holds precisely
+		// the pool that is on screen. The refusals are deliberate answers instead: a pool mid-parse is
+		// reported as showing nothing because callers use this to decide what the terminal presents, and
+		// a pool whose parse failed is not valid to display at all, so until the client re-uploads or
 		// the working set is torn down it must not take the screen.
 		const auto processingState = (nullptr != workingSet) ?
 		  workingSet->get_object_pool_processing_state() :
@@ -4167,14 +4186,14 @@ namespace isobus
 		if ((VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Running != processingState) &&
 		    (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Fail != processingState))
 		{
-			const auto &objectTree = workingSet->get_object_tree();
-			auto workingSetEntry = objectTree.find(workingSet->get_working_set_object_id());
+			const auto objectTree = workingSet->get_object_tree();
+			auto workingSetEntry = objectTree->find(workingSet->get_working_set_object_id());
 
-			if ((objectTree.end() != workingSetEntry) && (nullptr != workingSetEntry->second))
+			if ((objectTree->end() != workingSetEntry) && (nullptr != workingSetEntry->second))
 			{
-				auto maskEntry = objectTree.find(std::static_pointer_cast<WorkingSet>(workingSetEntry->second)->get_active_mask());
+				auto maskEntry = objectTree->find(std::static_pointer_cast<WorkingSet>(workingSetEntry->second)->get_active_mask());
 
-				if ((objectTree.end() != maskEntry) && (nullptr != maskEntry->second))
+				if ((objectTree->end() != maskEntry) && (nullptr != maskEntry->second))
 				{
 					retVal = maskEntry->second;
 				}

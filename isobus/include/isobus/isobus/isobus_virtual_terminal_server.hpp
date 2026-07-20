@@ -1094,12 +1094,12 @@ namespace isobus
 		bool is_any_alarm_mask_active() const;
 
 		/// @brief Returns the mask object a working set currently has active.
-		/// @details This is safe to call for a working set other than the one being served. It looks the
-		/// mask up through the const object tree rather than get_object_by_id, which is
-		/// std::map::operator[] and default-inserts on a miss: inserting here would both pollute another
-		/// client's tree with a phantom entry and race the worker thread parsing that client's pool. A
-		/// working set whose pool is still being parsed reports no mask for the same reason -- a
-		/// half-built tree cannot meaningfully answer, and it is being written from another thread.
+		/// @details This is safe to call for a working set other than the one being served. It takes one
+		/// snapshot of that working set's object tree and resolves both the Working Set object and the
+		/// mask it names from that same snapshot, so the answer describes a single coherent pool. A
+		/// working set whose pool is still being parsed, or whose parse failed, reports no mask. That is
+		/// a policy choice rather than a safety requirement: the snapshot would make either read safe,
+		/// but neither is a pool that may be presented to the operator.
 		/// @param[in] workingSet The working set to inspect
 		/// @returns The active mask object, or an empty shared pointer if it cannot be resolved
 		std::shared_ptr<VTObject> get_active_mask_object(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet) const;

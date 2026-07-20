@@ -44,7 +44,15 @@ bool collect_masks(std::uint8_t *pool, std::uint32_t size)
 	if (!result)
 		return false;
 
-	for (const auto &obj : vt.get_object_tree())
+	// Driving parse_iop_into_objects directly means publishing the finished pool directly too: the
+	// tree readers see is only ever swapped in as a whole, and nothing else here does it.
+	vt.publish_object_tree();
+
+	// Held in a named local: a range-for does not extend the lifetime of a temporary the range
+	// expression was dereferenced from.
+	const auto objectTree = vt.get_object_tree();
+
+	for (const auto &obj : *objectTree)
 	{
 		using ObjType = isobus::VirtualTerminalObjectType;
 

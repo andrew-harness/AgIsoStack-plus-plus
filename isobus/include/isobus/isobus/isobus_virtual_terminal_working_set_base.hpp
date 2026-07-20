@@ -12,10 +12,15 @@
 
 #include "isobus/isobus/isobus_virtual_terminal_objects.hpp"
 
+#include <map>
+#include <memory>
 #include <mutex>
 
 namespace isobus
 {
+	/// @brief The deserialized object pool: every parsed VT object of one working set, keyed by object ID
+	using ObjectTree = std::map<std::uint16_t, std::shared_ptr<VTObject>>;
+
 	/// @brief A base class for a VT working set that isolates common working set functionality
 	/// so that things useful to VT designer application and a VT server application can be shared.
 	class VirtualTerminalWorkingSetBase
@@ -32,16 +37,33 @@ namespace isobus
 		/// @returns A colour from this working set's current colour table, by index
 		VTColourVector get_colour(std::uint8_t colourIndex) const;
 
-		/// @brief Returns the working set's object tree
-		/// @returns The working set's object tree
-		const std::map<std::uint16_t, std::shared_ptr<VTObject>> &get_object_tree() const;
+		/// @brief Returns an immutable snapshot of the working set's object tree
+		/// @details The snapshot is never null and is never modified once handed out, so the caller's
+		/// copy stays valid and self-consistent however the pool changes afterwards. That is what makes
+		/// the tree readable from a thread other than the one parsing it: the parse worker builds into a
+		/// staging tree it owns alone and swaps a finished tree in as a whole, so no reader ever
+		/// traverses a map another thread is inserting into, and no reader ever sees a half-built pool.
+		/// Taking a snapshot costs one mutex acquisition and one reference count increment and allocates
+		/// nothing, so it is safe to call on a drawing path.
+		/// @returns An immutable snapshot of the working set's object tree
+		std::shared_ptr<const ObjectTree> get_object_tree() const;
 
-		/// @brief Returns a VT object from the object tree by object ID
+		/// @brief Publishes the staging object tree as the snapshot that get_object_tree() hands out
+		/// @details Call this once a pool has been parsed through to completion -- never per object, and
+		/// never between the chunks of a single pool -- because everything the snapshot is for rests on
+		/// it changing only as a whole. The VT server's parse worker calls this itself once all of a
+		/// pool's chunks have parsed. It is public for code that drives parse_iop_into_objects()
+		/// directly, such as an offline pool loader, which otherwise parses into a staging tree that
+		/// nothing ever reads.
+		void publish_object_tree();
+
+		/// @brief Returns a VT object from the published object tree by object ID
 		/// @details The lookup does not modify the object tree: an ID that is absent, that is
 		/// NULL_OBJECT_ID, or whose entry holds a null pointer yields an empty shared pointer and
 		/// leaves the tree untouched. That matters because object IDs reach here straight off the
-		/// bus in the VT server's command handlers, and because the pool parser inserts into the
-		/// same tree from its own thread.
+		/// bus in the VT server's command handlers. The lookup reads the published snapshot rather
+		/// than the staging tree, so a pool being parsed on the worker thread cannot be observed
+		/// part-built.
 		/// @param[in] objectID The object ID to retrieve from the object tree
 		/// @returns A VT object from the object tree by object ID, or an empty shared pointer if not found
 		std::shared_ptr<VTObject> get_object_by_id(std::uint16_t objectID);
@@ -80,8 +102,16 @@ namespace isobus
 		bool is_object_pool_within_declared_iop_size() const;
 
 	protected:
-		/// @brief Adds an object to the object tree, and replaces an object
+		/// @brief Publishes an empty object tree, so readers see no pool at all
+		/// @details Holds the invariant that the published tree is non-empty only for a pool that
+		/// parsed through to completion. The staging tree is left as it is, so a pool whose parse
+		/// failed can still be retried by transferring the rest of it.
+		void clear_published_object_tree();
+
+		/// @brief Adds an object to the staging object tree, and replaces an object
 		/// if there's already one in the tree with the same ID.
+		/// @details Writes the staging tree only. It deliberately does not publish: publishing per
+		/// object would expose exactly the part-built pool the staging tree exists to hide.
 		/// @param[in] objectToAdd The object to add to the object tree
 		/// @returns true if the object was added or replaced, otherwise false
 		bool add_or_replace_object(std::shared_ptr<VTObject> objectToAdd);
@@ -140,10 +170,12 @@ namespace isobus
 		                              std::uint32_t &iopLength) const;
 
 		std::mutex managedWorkingSetMutex; ///< A mutex to protect the interface of the managed working set
+		mutable std::mutex objectTreeMutex; ///< Guards publishedObjectTree, the POINTER and nothing else. It is held only long enough to read or replace that pointer and never across a traversal of the tree it points at, so a reader can neither block the parse worker for any meaningful time nor deadlock against it.
 		VTColourTable workingSetColourTable; ///< This working set's colour table
 		std::uint32_t iopSize = 0; ///< Total size of the IOP in bytes
 		std::uint32_t transferredIopSize = 0; ///< Total number of IOP bytes transferred
-		std::map<std::uint16_t, std::shared_ptr<VTObject>> vtObjectTree; ///< The C++ object representation (deserialized) of the object pool being managed
+		ObjectTree vtObjectTree; ///< The staging tree: the C++ object representation (deserialized) of the object pool being managed. Written only by the pool parse worker, which owns it exclusively for the duration of a parse, and never read by another thread -- every other reader takes the published snapshot instead.
+		std::shared_ptr<const ObjectTree> publishedObjectTree = std::make_shared<const ObjectTree>(); ///< The immutable snapshot readers see, swapped in whole by publish_object_tree(). Never null, so no reader has to null-check it; empty until a pool has parsed through to completion.
 		std::vector<std::vector<std::uint8_t>> iopFilesRawData; ///< Raw IOP File data from the client
 		std::size_t parsedIopFileCount = 0; ///< Count of iopFilesRawData chunks already parsed into the tree. A runtime object pool update (C.2.6) parses only the newer chunks so live objects -- and any runtime state on them -- are merged with, not rebuilt from, the authored bytes.
 		std::uint16_t workingSetID = NULL_OBJECT_ID; ///< Stores the object ID of the working set object itself

@@ -107,9 +107,40 @@ namespace isobus
 		return workingSetColourTable.get_colour(colourIndex);
 	}
 
-	const std::map<std::uint16_t, std::shared_ptr<VTObject>> &VirtualTerminalWorkingSetBase::get_object_tree() const
+	std::shared_ptr<const ObjectTree> VirtualTerminalWorkingSetBase::get_object_tree() const
 	{
-		return vtObjectTree;
+		const std::lock_guard<std::mutex> lock(objectTreeMutex);
+		return publishedObjectTree;
+	}
+
+	void VirtualTerminalWorkingSetBase::publish_object_tree()
+	{
+		// The copy is made outside the lock: it is the expensive part, and it touches only the staging
+		// tree, which the parse that is publishing owns exclusively.
+		auto snapshot = std::make_shared<const ObjectTree>(vtObjectTree);
+
+		// The outgoing tree is carried out of the locked scope so its destructor -- which frees a node
+		// per object once the last reader lets go -- runs with the mutex released. The lock covers the
+		// two pointer moves and nothing else.
+		std::shared_ptr<const ObjectTree> previous;
+
+		{
+			const std::lock_guard<std::mutex> lock(objectTreeMutex);
+			previous = std::move(publishedObjectTree);
+			publishedObjectTree = std::move(snapshot);
+		}
+	}
+
+	void VirtualTerminalWorkingSetBase::clear_published_object_tree()
+	{
+		auto snapshot = std::make_shared<const ObjectTree>();
+		std::shared_ptr<const ObjectTree> previous;
+
+		{
+			const std::lock_guard<std::mutex> lock(objectTreeMutex);
+			previous = std::move(publishedObjectTree);
+			publishedObjectTree = std::move(snapshot);
+		}
 	}
 
 	bool VirtualTerminalWorkingSetBase::add_or_replace_object(std::shared_ptr<VTObject> objectToAdd)
@@ -138,9 +169,14 @@ namespace isobus
 			{
 				case VirtualTerminalObjectType::WorkingSet:
 				{
+					// Resolved against the staging tree, not the published snapshot: the pool being
+					// parsed is the one this check is about, and the snapshot still holds the previous
+					// pool until this parse completes.
+					const auto existingWorkingSetObject = VTObject::get_object_by_id(workingSetID, vtObjectTree);
+
 					if ((NULL_OBJECT_ID == workingSetID) ||
-					    ((nullptr != get_object_by_id(workingSetID)) &&
-					     (get_object_by_id(workingSetID)->get_id() == decodedID)))
+					    ((nullptr != existingWorkingSetObject) &&
+					     (existingWorkingSetObject->get_id() == decodedID)))
 					{
 						workingSetID = decodedID;
 						auto tempObject = std::make_shared<WorkingSet>();
@@ -1996,7 +2032,9 @@ namespace isobus
 						// Table B.64: an object pool shall not contain more than one Object Label Reference
 						// List object. An object of this type already carrying the ID being parsed is the
 						// same object arriving again in a run-time object pool update, which replaces it
-						// rather than adding a second one.
+						// rather than adding a second one. The scan runs over the staging tree, which is
+						// what a run-time update is merging into; the published snapshot still holds the
+						// pre-update pool at this point.
 						for (const auto &existingObject : vtObjectTree)
 						{
 							if ((nullptr != existingObject.second) &&
@@ -2455,7 +2493,7 @@ namespace isobus
 
 	std::shared_ptr<VTObject> VirtualTerminalWorkingSetBase::get_object_by_id(std::uint16_t objectID)
 	{
-		return VTObject::get_object_by_id(objectID, vtObjectTree);
+		return VTObject::get_object_by_id(objectID, *get_object_tree());
 	}
 
 	std::shared_ptr<VTObject> VirtualTerminalWorkingSetBase::get_working_set_object()
@@ -2471,14 +2509,16 @@ namespace isobus
 	bool VirtualTerminalWorkingSetBase::get_object_id_exists(std::uint16_t objectID)
 	{
 		bool retVal;
+		const auto objectTree = get_object_tree();
+		const auto foundObject = objectTree->find(objectID);
 
-		if (vtObjectTree.find(objectID) == vtObjectTree.end())
+		if (objectTree->end() == foundObject)
 		{
 			retVal = false;
 		}
 		else
 		{
-			retVal = nullptr != vtObjectTree[objectID];
+			retVal = nullptr != foundObject->second;
 		}
 		return retVal;
 	}
