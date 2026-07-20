@@ -149,8 +149,22 @@ namespace isobus
 
 		if (nullptr != objectToAdd)
 		{
-			vtObjectTree[objectToAdd->get_id()] = objectToAdd;
-			retVal = true;
+			const auto existingObject = vtObjectTree.find(objectToAdd->get_id());
+
+			if ((vtObjectTree.end() != existingObject) &&
+			    (nullptr != existingObject->second) &&
+			    (existingObject->second->get_object_type() != objectToAdd->get_object_type()))
+			{
+				LOG_ERROR("[WS]: Object %u is already in the object pool as type %u and cannot be re-declared as type %u. ISO 11783-6 clause 4.6.1.1 requires an object ID to be unique within a working set's object pool.",
+				          static_cast<unsigned int>(objectToAdd->get_id()),
+				          static_cast<unsigned int>(existingObject->second->get_object_type()),
+				          static_cast<unsigned int>(objectToAdd->get_object_type()));
+			}
+			else
+			{
+				vtObjectTree[objectToAdd->get_id()] = objectToAdd;
+				retVal = true;
+			}
 		}
 		return retVal;
 	}

@@ -109,11 +109,21 @@ namespace isobus
 		void clear_published_object_tree();
 
 		/// @brief Adds an object to the staging object tree, and replaces an object
-		/// if there's already one in the tree with the same ID.
+		/// if there's already one in the tree with the same ID and the same object type.
 		/// @details Writes the staging tree only. It deliberately does not publish: publishing per
 		/// object would expose exactly the part-built pool the staging tree exists to hide.
+		///
+		/// Invariant: an object ID identifies one object of one type for the life of the pool. ISO
+		/// 11783-6 clause 4.6.1.1 requires object IDs to be unique within a working set's object pool,
+		/// and every parent that references an ID does so expecting a particular type -- the server
+		/// itself downcasts the working set's own ID to a WorkingSet without re-checking. A replacement
+		/// may change the object's contents and its record size, which is what a run-time object pool
+		/// update does (clause C.2.6, whose example is lengthening a string object), but it may not
+		/// change what the object is. An ID already in the tree under a different type is therefore
+		/// rejected rather than overwritten.
 		/// @param[in] objectToAdd The object to add to the object tree
-		/// @returns true if the object was added or replaced, otherwise false
+		/// @returns true if the object was added or replaced, false if the object was null or its ID
+		/// is already in the object pool under a different object type
 		bool add_or_replace_object(std::shared_ptr<VTObject> objectToAdd);
 
 		/// @brief Parses one object in the remaining object pool data
