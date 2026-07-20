@@ -650,6 +650,32 @@ namespace isobus
 
 			case Function::ObjectPoolTransferMessage:
 			{
+				if (managedWorkingSet->is_object_pool_parse_outstanding())
+				{
+					// The transferred data is dropped, because it cannot be stored and there is nothing
+					// else to answer with. It cannot be stored because the parse worker iterates the raw
+					// chunk buffer for the whole length of a parse, so appending to it can reallocate the
+					// buffer out from under a live element reference. And there is nothing else to answer
+					// with because ISO 11783-6 C.2.3 defines no response to this message at all ("Since
+					// there is no response to this message, it is recommended to not send single objects
+					// that fit within a single packet").
+					//
+					// Dropping is the right answer rather than a lesser evil. A working set that reaches
+					// here is ignoring both of the mechanisms the standard gave it: C.2.2 g) requires it
+					// to wait for the response to its previous Annex C command before sending another,
+					// and C.2.5 gives it the VT Status busy-parsing bit to wait on while the VT parses.
+					//
+					// Nothing later in the transfer would reveal the gap on its own. The worker parses
+					// each chunk from its own offset, so one dropped chunk does not desynchronise the
+					// others: the chunks that did arrive parse cleanly, the End of Object Pool that ends
+					// the transfer reports success, and the objects the dropped chunk carried are simply
+					// absent from the pool the client is then told is loaded. Recording the drop is what
+					// turns that silent success into the error response End of Object Pool sends below.
+					managedWorkingSet->set_object_pool_transfer_data_dropped();
+					LOG_WARNING("[VT Server]: Client at address %u transferred object pool data while its previous pool is still being parsed. Dropping the data; this client should be waiting on the VT Status busy-parsing bit. Its End of Object Pool will now be refused.", message.get_identifier().get_source_address());
+					break;
+				}
+
 				std::vector<std::uint8_t> tempPool = data; // Make a copy of the data (ouch)
 				tempPool.erase(tempPool.begin()); // Strip off the mux byte (double ouch, good thing this is rare)
 				LOG_INFO("[VT Server]: An ecu at address %u transferred %u bytes of object pool data to us.", message.get_identifier().get_source_address(), static_cast<std::uint32_t>(tempPool.size()));
@@ -861,6 +887,23 @@ namespace isobus
 					break;
 				}
 
+				if (managedWorkingSet->is_object_pool_parse_outstanding())
+				{
+					// Loading a version appends the stored pool to the raw chunk buffer the parse worker
+					// is iterating, which can reallocate it under a live element reference, and it would
+					// then have to start a parse that cannot be started while one is outstanding. So the
+					// command is refused. E.15 byte 6 bit 3, "Any other error", is the bit for it: the VT
+					// is busy, which is none of the file system, version label or memory faults the other
+					// three bits name.
+					//
+					// A conformant client cannot see this. E.14 requires the working set master to wait
+					// for the Extended Load Version response, and until then to watch the VT Status
+					// busy-parsing bit, before assuming its command was lost.
+					send_extended_load_version_response(get_bit(static_cast<std::uint8_t>(LoadVersionErrorBit::AnyOtherError)), managedWorkingSet->get_control_function());
+					LOG_WARNING("[VT Server]: Client at address %u sent an Extended Load Version command while its object pool is still being parsed. Refusing it.", message.get_identifier().get_source_address());
+					break;
+				}
+
 				std::vector<std::uint8_t> versionLabel;
 
 				versionLabel.reserve(EXTENDED_VERSION_LABEL_LENGTH);
@@ -875,6 +918,23 @@ namespace isobus
 				{
 					managedWorkingSet->set_iop_size(static_cast<std::uint32_t>(loadedVersion.size()));
 					managedWorkingSet->add_iop_raw_data(loadedVersion);
+
+					// A parse belongs to a load that produced something to parse. Started outside this
+					// branch it would also run when no version was found -- on a working set that still
+					// holds an earlier pool, a parse of zero new chunks that succeeds and sends a second,
+					// contradicting response saying the version loaded.
+					//
+					// The two flags select the message that completes this parse, so they describe a
+					// parse this call actually started and nothing else. Set after a start that did not
+					// happen, they would redirect the completion of whatever parse is already
+					// outstanding, answering a client waiting on an End of Object Pool response with an
+					// Extended Load Version response instead.
+					if (managedWorkingSet->start_parsing_thread())
+					{
+						managedWorkingSet->set_was_object_pool_loaded_from_non_volatile_memory(true, {});
+						managedWorkingSet->set_loaded_via_extended_version_command(true, {});
+						LOG_DEBUG("[VT Server]: Starting parsing thread for loaded extended pool data.");
+					}
 				}
 				else
 				{
@@ -896,19 +956,21 @@ namespace isobus
 					                                               get_priority());
 					LOG_ERROR("[VT Server]: Failed to load requested extended object pool version");
 				}
-
-				if (managedWorkingSet->get_any_object_pools())
-				{
-					managedWorkingSet->start_parsing_thread();
-					managedWorkingSet->set_was_object_pool_loaded_from_non_volatile_memory(true, {});
-					managedWorkingSet->set_loaded_via_extended_version_command(true, {});
-					LOG_DEBUG("[VT Server]: Starting parsing thread for loaded extended pool data.");
-				}
 			}
 			break;
 
 			case Function::LoadVersionCommand:
 			{
+				if (managedWorkingSet->is_object_pool_parse_outstanding())
+				{
+					// Same reasoning as the Extended Load Version command above, against E.6 and E.7:
+					// the raw chunk buffer belongs to the parse worker while it runs, and a second parse
+					// cannot be started while one is outstanding. E.7 byte 6 bit 3 is "Any other error".
+					send_load_version_response(get_bit(static_cast<std::uint8_t>(LoadVersionErrorBit::AnyOtherError)), managedWorkingSet->get_control_function());
+					LOG_WARNING("[VT Server]: Client at address %u sent a Load Version command while its object pool is still being parsed. Refusing it.", message.get_identifier().get_source_address());
+					break;
+				}
+
 				std::vector<std::uint8_t> versionLabel;
 
 				versionLabel.reserve(VERSION_LABEL_LENGTH);
@@ -923,18 +985,19 @@ namespace isobus
 				{
 					managedWorkingSet->set_iop_size(static_cast<std::uint32_t>(loadedVersion.size()));
 					managedWorkingSet->add_iop_raw_data(loadedVersion);
+
+					// Inside the success branch, and the flag set only when a worker actually started.
+					// See the extended path above for what each of those prevents.
+					if (managedWorkingSet->start_parsing_thread())
+					{
+						managedWorkingSet->set_was_object_pool_loaded_from_non_volatile_memory(true, {});
+						LOG_DEBUG("[VT Server]: Starting parsing thread for loaded pool data.");
+					}
 				}
 				else
 				{
 					send_load_version_response(0x01, managedWorkingSet->get_control_function());
 					LOG_ERROR("[VT Server]: Failed to load requested object pool version");
-				}
-
-				if (managedWorkingSet->get_any_object_pools())
-				{
-					managedWorkingSet->start_parsing_thread();
-					managedWorkingSet->set_was_object_pool_loaded_from_non_volatile_memory(true, {});
-					LOG_DEBUG("[VT Server]: Starting parsing thread for loaded pool data.");
 				}
 			}
 			break;
@@ -1036,7 +1099,44 @@ namespace isobus
 
 			case Function::EndOfObjectPoolMessage:
 			{
-				if (managedWorkingSet->get_any_object_pools())
+				if (managedWorkingSet->get_object_pool_transfer_data_dropped())
+				{
+					// Object Pool Transfer data for this working set was discarded, so the pool is
+					// missing objects the client believes it sent. Parsing what did arrive would parse
+					// cleanly and report success, telling the client a pool loaded that is not the pool
+					// it transferred -- so the pool is refused instead.
+					//
+					// C.2.5 byte 2 bit 0, "There are errors in the Object Pool, refer to Bytes 3 to 8",
+					// with byte 7 bit 2, "any other error". No single object is at fault -- the fault is
+					// a hole in the transfer -- so the parent and faulting object IDs stay NULL, and byte
+					// 7 genuinely carries an error, which is what byte 2 bit 0 promises the client it
+					// will find there.
+					//
+					// This is refused for as long as the pool lives, not just once: the discarded bytes
+					// are unrecoverable and C.2.3 defines no response that could have told the client
+					// which ones to resend, so a second End of Object Pool would report success on the
+					// same incomplete pool. A Delete Object Pool (F.44) clears the record along with the
+					// pool, which is how a client that wants to start over does it.
+					//
+					// The consequences match every other End of Object Pool failure rather than
+					// inventing new ones, because this is one: an incomplete pool on an already-active
+					// working set is a failed runtime object pool update, and C.2.6 has the VT delete
+					// the entire pool -- the pre-update version included -- and suspend the working set.
+					// So the same test the parse-failure path uses, the same byte 7 bit 3 telling the
+					// client the pool was deleted from volatile memory, and the same deletion request.
+					// An incomplete pool on a working set that never became active is an initial-upload
+					// failure and is left in place for the client to retry, again as there.
+					const bool poolWasActive = (managedWorkingSet == activeWorkingSet);
+
+					LOG_ERROR("[VT Server]: Refusing the object pool of the working set at address %u: transfer data for it was dropped while an earlier parse was outstanding, so the pool is incomplete.", message.get_identifier().get_source_address());
+					send_end_of_object_pool_response(false, NULL_OBJECT_ID, NULL_OBJECT_ID, static_cast<std::uint8_t>(get_bit(2) | (poolWasActive ? get_bit(3) : 0)), managedWorkingSet->get_control_function());
+
+					if (poolWasActive)
+					{
+						managedWorkingSet->request_deletion();
+					}
+				}
+				else if (managedWorkingSet->get_any_object_pools())
 				{
 					managedWorkingSet->start_parsing_thread();
 				}

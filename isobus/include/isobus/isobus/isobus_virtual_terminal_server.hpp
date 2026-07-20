@@ -616,6 +616,18 @@ namespace isobus
 			AnyOtherError = 8
 		};
 
+		/// @brief Enumerates the bit indices of the error fields that can be set in a load version
+		/// response and in an extended load version response
+		/// @details ISO 11783-6 E.7 and E.15 define byte 6 of both responses identically. Bit 0 exists
+		/// in VT version 4 and later.
+		enum class LoadVersionErrorBit : std::uint8_t
+		{
+			FileSystemErrorOrPoolDataCorruption = 0,
+			VersionLabelNotCorrectOrUnknown = 1,
+			InsufficientMemoryAvailable = 2,
+			AnyOtherError = 3
+		};
+
 		/// @brief Enumerates the possible values of the Screen Capture command Item Requested field
 		enum class ScreenCaptureItem
 		{

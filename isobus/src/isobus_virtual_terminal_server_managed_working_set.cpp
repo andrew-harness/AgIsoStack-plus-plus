@@ -50,12 +50,16 @@ namespace isobus
 		join_parsing_thread();
 	}
 
-	void VirtualTerminalServerManagedWorkingSet::start_parsing_thread()
+	bool VirtualTerminalServerManagedWorkingSet::start_parsing_thread()
 	{
+		bool retVal = false;
+
 		if (nullptr == objectPoolProcessingThread)
 		{
 			objectPoolProcessingThread.reset(new std::thread([this]() { worker_thread_function(); }));
+			retVal = true;
 		}
+		return retVal;
 	}
 
 	void VirtualTerminalServerManagedWorkingSet::join_parsing_thread()

@@ -92,6 +92,16 @@ namespace isobus
 		iopFilesRawData.push_back(dataToAdd);
 	}
 
+	void VirtualTerminalWorkingSetBase::set_object_pool_transfer_data_dropped()
+	{
+		objectPoolTransferDataDropped = true;
+	}
+
+	bool VirtualTerminalWorkingSetBase::get_object_pool_transfer_data_dropped() const
+	{
+		return objectPoolTransferDataDropped;
+	}
+
 	std::size_t VirtualTerminalWorkingSetBase::get_number_iop_files() const
 	{
 		return iopFilesRawData.size();
@@ -148,6 +158,10 @@ namespace isobus
 		// Names the Working Set object of the deleted pool. Left set, the working-set parse of the next
 		// pool resolves it against an empty tree, finds nothing, and refuses the new Working Set object.
 		workingSetID = NULL_OBJECT_ID;
+
+		// Describes the pool that is being discarded here, not the working set. Left set, the next pool
+		// -- every byte of which did arrive -- would be refused for a gap in its predecessor.
+		objectPoolTransferDataDropped = false;
 
 		{
 			// iopSize and transferredIopSize are written under this mutex because set_iop_size() writes

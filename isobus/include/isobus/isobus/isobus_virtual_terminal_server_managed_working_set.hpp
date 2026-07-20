@@ -61,7 +61,19 @@ namespace isobus
 		~VirtualTerminalServerManagedWorkingSet();
 
 		/// @brief Starts a thread to parse the received object pool files
-		void start_parsing_thread();
+		/// @details Starts a worker only when none is outstanding, and reports which happened. A false
+		/// return is not an error: ISO 11783-6 C.2.2 f) lets a working set master retry the End of
+		/// Object Pool message while it waits, and the response owed by the parse already running
+		/// answers the retry.
+		///
+		/// The return value is the contract for anything the caller would set to describe the parse it
+		/// believes it just started. In particular the message that completes a parse is selected by
+		/// per-working-set state (see set_was_object_pool_loaded_from_non_volatile_memory), so a caller
+		/// that changed it after a false return would redirect the completion of the parse already
+		/// outstanding -- answering a client waiting on an End of Object Pool response with a Load
+		/// Version response instead.
+		/// @returns True if a parse worker was started by this call, false if one was already outstanding
+		bool start_parsing_thread();
 
 		/// @brief Joins the parsing thread
 		void join_parsing_thread();

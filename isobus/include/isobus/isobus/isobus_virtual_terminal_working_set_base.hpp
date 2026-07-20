@@ -89,6 +89,21 @@ namespace isobus
 		/// @returns The IOP file data by index of IOP file
 		std::vector<std::uint8_t> &get_iop_raw_data(std::size_t index);
 
+		/// @brief Records that object pool transfer data addressed to this working set was discarded
+		/// @details Sticky for the life of the pool. The bytes of a discarded Object Pool Transfer are
+		/// gone -- ISO 11783-6 C.2.3 defines no response to that message, so the client is never told
+		/// and cannot know to resend -- and every object they carried is therefore missing from the
+		/// pool. Nothing later in the transfer reveals this: the parse walks each chunk from its own
+		/// offset, so the chunks that did arrive parse cleanly and the pool reports success while the
+		/// dropped objects are simply absent. Only reset_object_pool_storage() clears this, which means
+		/// a client recovers by deleting the pool and uploading again, not by sending End of Object
+		/// Pool a second time.
+		void set_object_pool_transfer_data_dropped();
+
+		/// @brief Returns whether object pool transfer data addressed to this working set was discarded
+		/// @returns True if any Object Pool Transfer data was discarded since the pool was last reset
+		bool get_object_pool_transfer_data_dropped() const;
+
 		/// @brief Returns the object ID of the the faulting object if parsing the object pool failed
 		/// @returns The object ID of the faulting object if parsing the object pool failed
 		std::uint16_t get_object_pool_faulting_object_id();
@@ -207,6 +222,7 @@ namespace isobus
 		std::size_t parsedIopFileCount = 0; ///< Count of iopFilesRawData chunks already parsed into the tree. A runtime object pool update (C.2.6) parses only the newer chunks so live objects -- and any runtime state on them -- are merged with, not rebuilt from, the authored bytes.
 		std::uint16_t workingSetID = NULL_OBJECT_ID; ///< Stores the object ID of the working set object itself
 		std::uint16_t faultingObjectID = NULL_OBJECT_ID; ///< Stores the faulting object ID to send to a client when parsing the pool fails
+		bool objectPoolTransferDataDropped = false; ///< Set when Object Pool Transfer data for this working set was discarded, so the pool is missing objects the client believes it sent. Sticky until reset_object_pool_storage().
 	};
 } // namespace isobus
 #endif // ISOBUS_VIRTUAL_TERMINAL_WORKING_SET_BASE_HPP
