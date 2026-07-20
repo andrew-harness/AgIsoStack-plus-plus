@@ -18,6 +18,7 @@
 #include "isobus/utility/event_dispatcher.hpp"
 
 #include <array>
+#include <deque>
 
 namespace isobus
 {
@@ -719,11 +720,21 @@ namespace isobus
 		/// @param[in] message The macro to execute
 		void execute_macro_as_rx_message(const CANMessage &message);
 
-		/// @brief Executes a macro synchronously by object ID.
+		/// @brief Executes a single macro's command packets synchronously by object ID, replaying each
+		/// through the server's own receive path. Called only by drain_macro_execution_queue; a command
+		/// that triggers another macro enqueues it, it is not run inline.
 		/// @param[in] objectIDOfMacro The object ID of the macro to execute
 		/// @param[in] workingSet The working set to execute the macro on
 		/// @returns true if the macro was executed, otherwise false
 		bool execute_macro(std::uint16_t objectIDOfMacro, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> workingSet);
+
+		/// @brief Executes every macro on the FIFO queue, in trigger order, each to completion before the
+		/// next starts, then returns (ISO 11783-6 4.6.11.4 b/c/d). A macro command that triggers another
+		/// enqueues it at the back and re-enters this function, which returns immediately because a drain
+		/// is already active -- so there is exactly one drain in flight and never more than one level of
+		/// nesting. The per-command execution budget is the only bound: a self-referencing macro
+		/// re-enqueues itself forever, and the budget stops it.
+		void drain_macro_execution_queue();
 
 		/// @brief Returns the priority to use, depending on the VT version
 		/// @returns The priority to use, depending on the VT version
@@ -1210,10 +1221,16 @@ namespace isobus
 		std::uint8_t activeWorkingSetMasterAddress = NULL_CAN_ADDRESS; ///< The address of the active working set's master
 		std::uint8_t busyCodesBitfield = 0; ///< The busy codes bitfield
 		std::uint8_t currentCommandFunctionCode = 0; ///< The current command function code being processed
-		std::uint8_t macroExecutionDepth = 0; ///< Non-zero while command messages from a macro are being executed, which withholds their responses (ISO 11783-6 4.6.11.4 f). A depth rather than a flag because a macro command may itself be Execute Macro
-		static constexpr std::uint8_t MAX_MACRO_EXECUTION_DEPTH = 16; ///< How deeply macros may nest before the VT refuses to go further. ISO 11783-6 sets no nesting ceiling, so this bound is the VT's own: 4.6.11.4 forbids circular references but places that obligation on the object pool, and a pool with a circular or pathologically long macro chain would otherwise exhaust the stack
-		std::array<std::uint16_t, MAX_MACRO_EXECUTION_DEPTH> activeMacroIDs = {}; ///< The object IDs of the macros currently executing, one per nesting level, indexed by macroExecutionDepth. Entries [0, macroExecutionDepth) are the active chain, which is what makes a circular reference detectable
-		static constexpr std::uint32_t MAX_MACRO_EXECUTIONS_PER_COMMAND = 1000; ///< How many macro executions one bus command may trigger in total, across every nesting level, before the VT abandons the rest. This bounds the WORK a pool can demand, which the depth ceiling does not: a fan-out of macros can be exponentially wide while staying shallow and acyclic. The standard sets no such number; this bound is the VT's own, sized so a worst-case trigger blocks the CAN thread for well under the 3 s working set maintenance timeout
+		/// @brief One entry on the macro execution queue: a macro object ID and the working set it runs on.
+		struct QueuedMacro
+		{
+			std::uint16_t macroID; ///< The object ID of the macro to execute
+			std::shared_ptr<VirtualTerminalServerManagedWorkingSet> workingSet; ///< The working set the macro executes on
+		};
+		std::deque<QueuedMacro> macroExecutionQueue; ///< FIFO of macros awaiting execution. process_macro and the Execute Macro handler append matching macros here in trigger order; the drain runs them front to back. FIFO trigger order is the invariant ISO 11783-6 4.6.11.4 b/c require: a macro completes before another starts (b), and macros run in the order they were triggered (c)
+		std::uint8_t macroExecutionDepth = 0; ///< A 0/1 response-suppression window, not an unbounded depth: set to 1 for the whole drain and back to 0 when it empties. Non-zero withholds the responses of the macro-replayed commands (ISO 11783-6 4.6.11.4 f) and marks re-entrant messages so the per-command budget is not reset for them. The queue flattens all macro nesting to one drain level, so this never exceeds 1
+		bool macroQueueDraining = false; ///< True while drain_macro_execution_queue is running. A macro command that enqueues another calls the drain again; that call returns immediately on this flag, leaving the one active drain to reach the new entry -- which is what keeps exactly one drain in flight
+		static constexpr std::uint32_t MAX_MACRO_EXECUTIONS_PER_COMMAND = 1000; ///< How many macro executions one bus command may trigger before the VT abandons the rest. Under the queue this is the sole bound: a self-referencing macro re-enqueues itself on every run, an infinite loop the budget stops. The standard sets no such number; this bound is the VT's own, sized so a worst-case trigger blocks the CAN thread for well under the 3 s working set maintenance timeout
 		std::uint32_t macroExecutionsThisCommand = 0; ///< Macro executions attributed to the bus command currently being processed
 		bool macroExecutionBudgetExhausted = false; ///< Latched when the budget is spent, so abandoning the rest of the macros is logged once rather than once per remaining macro
 		bool statusMessagePending = true; ///< Set when a VT Status field the standard tracks (ISO 11783-6 G.2 bytes 2-6, or byte 7 bit 6) changes, so update() transmits promptly instead of waiting for the next 1 Hz tick

@@ -339,53 +339,29 @@ namespace isobus
 
 			if (macro->get_are_command_packets_valid())
 			{
-				// A macro command may itself be Execute Macro, so this macro can already be somewhere in
-				// the chain that led here. Running it again would re-enter here forever.
-				for (std::uint8_t i = 0; i < macroExecutionDepth; i++)
-				{
-					if (activeMacroIDs[i] == objectIDOfMacro)
-					{
-						LOG_ERROR("[VT Server]: Refusing to execute macro %u: circular macro reference, the macro is already executing. ISO 11783-6 4.6.11.4 does not permit circular references in an object pool.", objectIDOfMacro);
-						return retVal;
-					}
-				}
-
-				// An acyclic chain of macros can still be longer than the VT can afford to nest.
-				if (macroExecutionDepth >= MAX_MACRO_EXECUTION_DEPTH)
-				{
-					LOG_ERROR("[VT Server]: Refusing to execute macro %u: macro nesting depth limit of %u reached.", objectIDOfMacro, static_cast<std::uint16_t>(MAX_MACRO_EXECUTION_DEPTH));
-					return retVal;
-				}
-
-				// Once the budget is spent the rest of this bus command's macros are abandoned silently,
-				// so a wide tree logs one line rather than one per macro it declines to run. Refusing here
-				// also prunes the traversal: the command loop below never runs, so the subtree beneath a
-				// refused macro is never expanded.
-				if (macroExecutionBudgetExhausted)
-				{
-					return retVal;
-				}
-
-				// Neither the cycle check nor the depth ceiling bounds total work: a macro pool can fan out
-				// so that every root-to-leaf path is short and acyclic while the number of executions grows
-				// exponentially with depth.
+				// 4.6.11.4 places no ceiling on macro execution, but under the queue a self-referencing
+				// macro re-enqueues itself on every run, so the drain would loop forever without this
+				// budget. It is the sole bound now that the queue has flattened all nesting to one level.
+				// Spent once, it is latched and logged once, and the drain clears the rest of the queue.
+				// Reset per bus command (see process_rx_message).
 				if (macroExecutionsThisCommand >= MAX_MACRO_EXECUTIONS_PER_COMMAND)
 				{
-					macroExecutionBudgetExhausted = true;
-					LOG_ERROR("[VT Server]: Refusing to execute macro %u: macro execution budget of %u executions for one command is spent. Abandoning the remaining macros.", objectIDOfMacro, static_cast<unsigned int>(MAX_MACRO_EXECUTIONS_PER_COMMAND));
+					if (!macroExecutionBudgetExhausted)
+					{
+						macroExecutionBudgetExhausted = true;
+						LOG_ERROR("[VT Server]: Refusing to execute macro %u: macro execution budget of %u executions for one command is spent. Abandoning the remaining macros.", objectIDOfMacro, static_cast<unsigned int>(MAX_MACRO_EXECUTIONS_PER_COMMAND));
+					}
 					return retVal;
 				}
 
+				macroExecutionsThisCommand++;
 				LOG_DEBUG("[VT Server]: Executing macro %u", macro->get_id());
 				retVal = true;
 
 				// 4.6.11.4 f): the commands a macro contains execute, but the VT sends no response on the
-				// bus for any of them. A depth rather than a flag, because a macro command may itself be
-				// Execute Macro, which re-enters here.
-				activeMacroIDs[macroExecutionDepth] = objectIDOfMacro;
-				macroExecutionDepth++;
-				macroExecutionsThisCommand++;
-
+				// bus for any of them. The suppression window (macroExecutionDepth) is opened by the drain
+				// for the whole run, not here -- a command that is itself Execute Macro enqueues rather
+				// than re-entering, so there is no per-macro depth to track.
 				for (std::uint8_t j = 0; j < macro->get_number_of_commands(); j++)
 				{
 					std::vector<std::uint8_t> commandPacket;
@@ -402,11 +378,44 @@ namespace isobus
 						execute_macro_as_rx_message(message);
 					}
 				}
-
-				macroExecutionDepth--;
 			}
 		}
 		return retVal;
+	}
+
+	void VirtualTerminalServer::drain_macro_execution_queue()
+	{
+		// Re-entrancy guard: a macro command that triggers another macro enqueues it and calls this
+		// function again. The already-active drain will reach the new entry, so this call returns and
+		// there is only ever one drain running -- which is what flattens all macro nesting to one level
+		// and makes the FIFO order the trigger order (ISO 11783-6 4.6.11.4 b/c).
+		if (macroQueueDraining)
+		{
+			return;
+		}
+		macroQueueDraining = true;
+
+		// 4.6.11.4 f): withhold the responses of every macro-replayed command for the whole drain. One
+		// 0/1 window brackets the drain rather than a per-macro depth, because the queue does not nest.
+		macroExecutionDepth = 1;
+
+		while (!macroExecutionQueue.empty())
+		{
+			const QueuedMacro queued = macroExecutionQueue.front();
+			macroExecutionQueue.pop_front();
+			execute_macro(queued.macroID, queued.workingSet);
+
+			if (macroExecutionBudgetExhausted)
+			{
+				// The budget stopped a runaway (e.g. a self-referencing macro that re-enqueues itself).
+				// Drop the rest so the drain terminates; execute_macro already logged the one refusal.
+				macroExecutionQueue.clear();
+				break;
+			}
+		}
+
+		macroExecutionDepth = 0;
+		macroQueueDraining = false;
 	}
 
 	CANIdentifier::CANPriority VirtualTerminalServer::get_priority() const
@@ -2502,14 +2511,24 @@ namespace isobus
 				{
 					if (VirtualTerminalObjectType::Macro == targetObject->get_object_type())
 					{
-						if (execute_macro(objectID, managedWorkingSet))
+						if (std::static_pointer_cast<Macro>(targetObject)->get_are_command_packets_valid())
 						{
+							// 4.6.11.4 b/c/d: queue the macro, do not run it inline; the drain runs it (and
+							// any it triggers) FIFO to completion within this bus command. The response is
+							// sent AFTER the drain, so at bus level the suppression window is already closed
+							// (depth 0) and the client's own Execute Macro response is not withheld -- only
+							// the macro's contained commands, replayed inside the drain at depth 1, are
+							// (4.6.11.4 f). A nested Execute Macro (this handler reached from a replayed
+							// packet) is at depth 1 throughout, so its response is withheld and its drain
+							// call is the re-entrant no-op.
+							macroExecutionQueue.push_back({ objectID, managedWorkingSet });
+							drain_macro_execution_queue();
 							LOG_DEBUG("[VT Server]: Client %u execute macro command %u: completed.", managedWorkingSet->get_control_function()->get_address(), objectID);
 							send_execute_macro_or_extended_macro_response(objectID, 0, message.get_source_control_function(), false);
 						}
 						else
 						{
-							LOG_ERROR("[VT Server]: Client %u execute macro command: failed. Macro probably contains invalid commands. Object pool state may now be undefined!", managedWorkingSet->get_control_function()->get_address(), objectID);
+							LOG_ERROR("[VT Server]: Client %u execute macro command: failed. Macro contains invalid commands.", managedWorkingSet->get_control_function()->get_address(), objectID);
 							send_execute_macro_or_extended_macro_response(objectID, get_bit(static_cast<std::uint8_t>(ExecuteMacroResponseErrorBit::AnyOtherError)), message.get_source_control_function(), false);
 						}
 					}
@@ -2536,14 +2555,18 @@ namespace isobus
 				{
 					if (VirtualTerminalObjectType::Macro == targetObject->get_object_type())
 					{
-						if (execute_macro(objectID, managedWorkingSet))
+						if (std::static_pointer_cast<Macro>(targetObject)->get_are_command_packets_valid())
 						{
+							// See the ExecuteMacroCommand case: queue then drain, response after the drain
+							// so it is not suppressed at bus level (4.6.11.4 b/c/d/f).
+							macroExecutionQueue.push_back({ objectID, managedWorkingSet });
+							drain_macro_execution_queue();
 							LOG_DEBUG("[VT Server]: Client %u execute extended macro command %u: completed.", managedWorkingSet->get_control_function()->get_address(), objectID);
 							send_execute_macro_or_extended_macro_response(objectID, 0, message.get_source_control_function(), true);
 						}
 						else
 						{
-							LOG_ERROR("[VT Server]: Client %u execute extended macro command: failed. Macro probably contains invalid commands. Object pool state may now be undefined!", managedWorkingSet->get_control_function()->get_address(), objectID);
+							LOG_ERROR("[VT Server]: Client %u execute extended macro command: failed. Macro contains invalid commands.", managedWorkingSet->get_control_function()->get_address(), objectID);
 							send_execute_macro_or_extended_macro_response(objectID, get_bit(static_cast<std::uint8_t>(ExecuteMacroResponseErrorBit::AnyOtherError)), message.get_source_control_function(), true);
 						}
 					}
@@ -3002,10 +3025,10 @@ namespace isobus
 		    ((CAN_DATA_LENGTH <= message.get_data_length()) ||
 		     ((message.get_data_length() > 5) && (static_cast<std::uint8_t>(Function::ChangeStringValueCommand) == message.get_uint8_at(0))))) // Technically this message can be 6 bytes
 		{
-			// The macro execution budget is per BUS command, and the depth is what makes it so:
-			// execute_macro increments macroExecutionDepth before injecting a macro's command packets,
-			// so every macro-injected message re-enters here with a non-zero depth and does not reset.
-			// Only a message that actually arrived from the bus is at depth zero.
+			// The macro execution budget is per BUS command, and the suppression window is what makes it
+			// so: the drain sets macroExecutionDepth to 1 for the whole run, so every macro-replayed
+			// message re-enters here with a non-zero window and does not reset the budget. Only a message
+			// that actually arrived from the bus is at window zero.
 			if (0 == parentServer->macroExecutionDepth)
 			{
 				parentServer->macroExecutionsThisCommand = 0;
@@ -3831,14 +3854,20 @@ namespace isobus
 	{
 		if (nullptr != object && targetObjectType == object->get_object_type())
 		{
+			// Enqueue every macro on this object that matches the event, in the object's macro-list
+			// order, then drain. Enqueue-all-then-drain is what makes triggered macros run in trigger
+			// order and each complete before the next starts (ISO 11783-6 4.6.11.4 b/c). If a drain is
+			// already active (this object's event was itself raised by a macro-replayed command), the
+			// drain call is a no-op and the active drain runs these in turn.
 			for (std::uint8_t i = 0; i < object->get_number_macros(); i++)
 			{
 				auto macroMetadata = object->get_macro(i);
 				if (macroMetadata.event == macroEvent)
 				{
-					execute_macro(macroMetadata.macroID, workingset);
+					macroExecutionQueue.push_back({ macroMetadata.macroID, workingset });
 				}
 			}
+			drain_macro_execution_queue();
 		}
 	}
 
