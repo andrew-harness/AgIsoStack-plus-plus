@@ -47,8 +47,18 @@ namespace isobus
 		/// @param[in] associatedControlFunction The control function to associate with this working set
 		VirtualTerminalServerManagedWorkingSet(std::shared_ptr<ControlFunction> associatedControlFunction);
 
-		/// @brief Destructor
-		~VirtualTerminalServerManagedWorkingSet() = default;
+		/// @brief Destructor. Joins the object pool parse worker if one is still outstanding.
+		/// @details Invariant: a joinable std::thread is never destroyed. The C++ runtime calls
+		/// std::terminate() on the destruction of a joinable thread, so a working set released while
+		/// its parse worker is outstanding would take the whole VT process down -- every other working
+		/// set with it -- rather than losing just the one pool. Joining here holds that invariant
+		/// however the working set is released, including on process shutdown, where the server's
+		/// managed working set list is destroyed and a parse may still be in flight.
+		///
+		/// This is the last line of that defence and not the first: joining can block for as long as a
+		/// parse takes, so a caller running on the CAN thread must not release a working set whose
+		/// parse is outstanding -- it defers the release instead (see is_object_pool_parse_outstanding).
+		~VirtualTerminalServerManagedWorkingSet();
 
 		/// @brief Starts a thread to parse the received object pool files
 		void start_parsing_thread();

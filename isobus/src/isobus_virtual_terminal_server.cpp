@@ -4642,7 +4642,32 @@ namespace isobus
 			  (isobus::SystemTiming::time_expired_ms(maintenanceTimestamp, 3000));
 			const bool poolInvalidated = ws->is_deletion_requested();
 
-			if (maintenanceTimedOut || poolInvalidated)
+			// Invariant: the CAN thread never waits on an object pool parse. Erasing a working set drops
+			// what is normally the last reference to it, and its destructor joins the parse worker to
+			// hold the invariant that a joinable thread is never destroyed -- so erasing one whose worker
+			// is still outstanding would block this thread inside that join until the parse finished.
+			// Address claiming, the maintenance messages every other working set is timed out against,
+			// and the rest of the stack all stall behind it. So a teardown that lands mid-parse is
+			// deferred to a later update() instead. The stall is tens of milliseconds for a pool of
+			// ordinary size; it is the slower MCU target where it would become long enough to break the
+			// timings the rest of the stack depends on.
+			//
+			// The deferral is bounded and cannot strand a working set. A parse terminates, and the
+			// parse-completion loop above -- which runs before this one, on every update() -- joins the
+			// worker as soon as it observes Success or Fail, clearing this condition. Neither trigger is
+			// consumed by being deferred: request_deletion() is sticky, and the maintenance timestamp is
+			// refreshed only by a Working Set Maintenance message, which a working set being timed out
+			// under clause 4.6.9 is by definition not sending (and if it resumes, the working set is no
+			// longer lost and must not be torn down at all). The pass that follows the parse therefore
+			// tears it down.
+			//
+			// Both of those rest on the parse terminating. Nothing enforces that: parse_iop_into_objects
+			// loops on the remaining length and trusts parse_next_object either to consume bytes or to
+			// fail. A worker that did not terminate would leave this working set undeletable and would
+			// block shutdown in the destructor rather than aborting there.
+			const bool parseOutstanding = ws->is_object_pool_parse_outstanding();
+
+			if ((maintenanceTimedOut || poolInvalidated) && (!parseOutstanding))
 			{
 				const bool workingSetHasControlFunction = (nullptr != ws->get_control_function());
 				std::uint8_t lostAddress = isobus::NULL_CAN_ADDRESS;

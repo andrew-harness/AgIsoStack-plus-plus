@@ -34,6 +34,22 @@ namespace isobus
 		}
 	}
 
+	VirtualTerminalServerManagedWorkingSet::~VirtualTerminalServerManagedWorkingSet()
+	{
+		// Invariant: a joinable std::thread is never destroyed, because that calls std::terminate() and
+		// kills the VT process. The parse worker is joined here whatever the caller did, which covers
+		// every route to destruction at once -- process shutdown included, where nothing on the CAN
+		// thread gets the chance to join first.
+		//
+		// join_parsing_thread() is safe to call unconditionally from here: it is not virtual, it tests
+		// the thread handle and joinable() itself so it is a no-op when no worker is outstanding, and
+		// both the members it touches -- the thread handle and the base class's managedWorkingSetMutex,
+		// which the state write it ends with takes -- are still alive throughout this body. The worker
+		// captures a raw this and reaches back into those same members, and the join is what guarantees
+		// it has stopped doing so before any of them is destroyed.
+		join_parsing_thread();
+	}
+
 	void VirtualTerminalServerManagedWorkingSet::start_parsing_thread()
 	{
 		if (nullptr == objectPoolProcessingThread)
