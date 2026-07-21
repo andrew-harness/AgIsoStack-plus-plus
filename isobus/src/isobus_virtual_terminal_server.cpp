@@ -1503,8 +1503,51 @@ namespace isobus
 					// temporary that expired at the end of the argument list.
 					const auto objectTree = managedWorkingSet->get_object_tree();
 
+					// Attribute 3 on a Working Set is its active mask (Table B.2), so this write can make the very
+					// mask change a Change Active Mask command makes, reached by a different command. The old value
+					// is read before the generic set_attribute below so the same-mask gate can compare it.
+					const bool retargetsWorkingSetActiveMask =
+					  (VirtualTerminalObjectType::WorkingSet == targetObject->get_object_type()) &&
+					  (static_cast<std::uint8_t>(WorkingSet::AttributeName::ActiveMask) == attributeID);
+					const std::uint16_t oldActiveMaskObjectId = retargetsWorkingSetActiveMask ?
+					  std::static_pointer_cast<WorkingSet>(targetObject)->get_active_mask() :
+					  NULL_OBJECT_ID;
+
 					if (targetObject->set_attribute(attributeID, attributeData, *objectTree, errorCode)) // 0 Is always the read-only "type" attribute
 					{
+						// A Change Attribute that retargets a Working Set's active mask makes the same mask change a
+						// Change Active Mask command does, so ISO 11783-6 Table 5's Data-input rows bind here too: an
+						// object open for operator input is forced closed, and the responses "shall be sent in the
+						// indicated sequence" -- VT ESC, then VT Select Input Object (loses focus), then the command
+						// response (sent below), then the VT Status raised by the arbitration that follows. Annex
+						// H.10's sentence names the Change Active Mask COMMAND; this path is the same mask change
+						// caused by a different command and is closed identically (the analogy carries 0058 and 0059
+						// document). Sending it ahead of the response makes the wire order match the indicated
+						// sequence, and clearing the open/focus state here means the arbitration below (carry 0059)
+						// sees it already cleared and does not double-send for this working set. A re-select of the
+						// mask already active changes no mask and must not disturb an open edit, so the same-mask gate
+						// carry 0058 uses is applied here too.
+						if (retargetsWorkingSetActiveMask)
+						{
+							const std::uint16_t newActiveMaskObjectId = std::static_pointer_cast<WorkingSet>(targetObject)->get_active_mask();
+							const std::uint16_t openForInputBeforeMaskChange = managedWorkingSet->get_object_open_for_input();
+							if (newActiveMaskObjectId != oldActiveMaskObjectId)
+							{
+								if (NULL_OBJECT_ID != openForInputBeforeMaskChange)
+								{
+									send_vt_esc_message(openForInputBeforeMaskChange, 0, managedWorkingSet->get_control_function());
+									send_select_input_object_message(openForInputBeforeMaskChange, false, false, managedWorkingSet->get_control_function());
+									managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
+									managedWorkingSet->set_object_focus(NULL_OBJECT_ID);
+								}
+								else if (NULL_OBJECT_ID != managedWorkingSet->get_object_focus())
+								{
+									send_select_input_object_message(managedWorkingSet->get_object_focus(), false, false, managedWorkingSet->get_control_function());
+									managedWorkingSet->set_object_focus(NULL_OBJECT_ID);
+								}
+							}
+						}
+
 						send_change_attribute_response(objectID, 0, data.at(3), message.get_source_control_function());
 						LOG_DEBUG("[VT Server]: Client %u changed object %u attribute %u to %u", managedWorkingSet->get_control_function()->get_address(), objectID, attributeID, attributeData);
 
