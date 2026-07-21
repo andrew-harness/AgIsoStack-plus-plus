@@ -898,6 +898,36 @@ namespace isobus
 		/// @returns true if the message was sent, otherwise false
 		bool send_auxiliary_assignment_type_2(std::uint64_t inputUnitName, std::uint8_t functionType, std::uint16_t inputObjectId, std::uint16_t functionObjectId, bool storeAsPreferred, std::shared_ptr<ControlFunction> destination) const;
 
+		/// @brief Handles an Auxiliary Capabilities request (0x27, J.7.14) from the stateless message path
+		/// @param[in] message The CAN message that was received
+		/// @param[in] data The message data buffer
+		/// @returns true if a response was sent, otherwise false
+		bool handle_auxiliary_capabilities_request(const CANMessage &message, const std::vector<std::uint8_t> &data);
+
+		/// @brief Handles a Preferred Assignment command (0x22, J.7.7) from a working set, decoding its
+		/// (function -> input) pairs and routing them to on_auxiliary_preferred_assignment_received
+		/// @param[in] message The CAN message that was received
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_preferred_assignment_command(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Handles an Auxiliary Assignment Type 2 response (0x24, J.7.6) from a working set, routing
+		/// it to on_auxiliary_assignment_response_received
+		/// @param[in] message The CAN message that was received
+		/// @param[in] managedWorkingSet The working set that sent the response
+		void handle_auxiliary_assignment_type_2_command(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Handles an Auxiliary Input Status Type 2 Enable response (0x25, J.7.12) from a working set,
+		/// routing it to on_auxiliary_input_status_enable_response_received
+		/// @param[in] message The CAN message that was received
+		/// @param[in] managedWorkingSet The working set that sent the response
+		void handle_auxiliary_input_status_type_2_enable_command(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Handles an Auxiliary Input Type 2 Status message (0x26, J.7.9) from a working set, routing
+		/// it to on_auxiliary_input_status_received
+		/// @param[in] message The CAN message that was received
+		/// @param[in] managedWorkingSet The working set that sent the status
+		void handle_auxiliary_input_type_2_status_message(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
 		/// @brief Sends a response to a change background colour command
 		/// @param[in] objectID The object ID for the object to change
 		/// @param[in] errorBitfield An error bitfield
