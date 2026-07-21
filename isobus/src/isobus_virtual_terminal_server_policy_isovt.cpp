@@ -491,6 +491,10 @@ namespace isobus
 
 		if (selectedWorkingSet != activeWorkingSet)
 		{
+			// The working set losing the screen, captured before the reassignment below overwrites it,
+			// so its open input can be closed the way a mask change closes one.
+			auto displacedWorkingSet = activeWorkingSet;
+
 			activeWorkingSet = selectedWorkingSet;
 			activeWorkingSetMasterAddress = ((nullptr != selectedWorkingSet) && (nullptr != selectedWorkingSet->get_control_function())) ?
 			  selectedWorkingSet->get_control_function()->get_address() :
@@ -506,6 +510,56 @@ namespace isobus
 			if (nullptr != selectedWorkingSet)
 			{
 				dispatch_repaint(selectedWorkingSet);
+			}
+
+			// ISO 11783-6 Table 5 has no row for arbitration moving the screen to another working set,
+			// so this closes the displaced working set's open input BY ANALOGY to Table 5's mask-change
+			// row rather than by quoting it: clause 4.2 says the VT Status during data input names the
+			// working set and mask "which contains the input object", a state the VT can no longer
+			// honour once a different working set holds the screen. So the displaced working set's input
+			// is closed exactly as a mask change (Annex H.10) would close it -- the VT ESC message (its
+			// open object, error 0), then the VT Select Input Object deselect, then focus and open state
+			// cleared -- sent to THAT working set's own control function. A merely-focused (not open)
+			// object gets the deselect alone.
+			//
+			// The still-managed guard is load-bearing: this function also runs right after the loss
+			// teardown pass has erased lost working sets (update()), and a working set erased there has
+			// a gone control function, so nothing must be sent for it. Identity against
+			// managedWorkingSetList is the test -- an erased working set is no longer in it. The
+			// commanding working set of a Change Active Mask has already had its own open input cleared
+			// before this function runs (the same handler, carry 0058, ahead of its arbitration call),
+			// so a mask change never double-sends here for the working set that issued it; this only
+			// closes the DIFFERENT working set the arbitration displaces.
+			if (nullptr != displacedWorkingSet)
+			{
+				bool displacedStillManaged = false;
+
+				for (const auto &ws : managedWorkingSetList)
+				{
+					if (ws == displacedWorkingSet)
+					{
+						displacedStillManaged = true;
+						break;
+					}
+				}
+
+				if (displacedStillManaged)
+				{
+					const std::uint16_t displacedOpenObject = displacedWorkingSet->get_object_open_for_input();
+
+					if (NULL_OBJECT_ID != displacedOpenObject)
+					{
+						send_vt_esc_message(displacedOpenObject, 0, displacedWorkingSet->get_control_function());
+						send_select_input_object_message(displacedOpenObject, false, false, displacedWorkingSet->get_control_function());
+						displacedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
+						displacedWorkingSet->set_object_focus(NULL_OBJECT_ID);
+					}
+					else if (NULL_OBJECT_ID != displacedWorkingSet->get_object_focus())
+					{
+						send_select_input_object_message(displacedWorkingSet->get_object_focus(), false, false, displacedWorkingSet->get_control_function());
+						displacedWorkingSet->set_object_focus(NULL_OBJECT_ID);
+					}
+				}
 			}
 		}
 		refresh_active_mask_status_fields();
