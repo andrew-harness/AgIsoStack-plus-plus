@@ -555,7 +555,9 @@ namespace isobus
 		// window (like the acoustic alarm in clause 4.4 b), so each reason is logged here and raised on
 		// the backend once that exists; no audio/UI dependency is added.
 		// Out of scope here: NACK-until-reinitialise (re-initialisation happens naturally once the
-		// working set is gone) and auxiliary-assignment removal (AUX-N is unimplemented).
+		// working set is gone). Auxiliary-assignment removal rides the delete_object_pool call below:
+		// the derived server's override drops the lost working set's AUX-N assignments (the AUX-N
+		// engine lives in the derived server, ADR-0007).
 		bool workingSetWasTornDown = false;
 
 		for (auto workingSetIterator = managedWorkingSetList.begin(); managedWorkingSetList.end() != workingSetIterator;)
