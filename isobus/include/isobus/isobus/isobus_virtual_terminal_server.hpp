@@ -121,6 +121,20 @@ namespace isobus
 		/// @returns true if the message was sent, otherwise false
 		bool send_pointing_event_message(std::uint16_t xPosition, std::uint16_t yPosition, std::uint8_t touchState, std::shared_ptr<ControlFunction> destination) const;
 
+		/// @brief The VT ESC message tells the Working Set Master that operator input on an object was aborted.
+		/// @details ISO 11783-6 Annex H.10: the VT sends this message any time the operator presses the ESC
+		/// means, and when the VT closes an open input field because of a Change Active Mask command. Byte 1 is
+		/// the VT ESC function, bytes 2-3 the Object ID where input was aborted (used only when no error code is
+		/// set), byte 4 the error bitfield (bit 0 "No input field is selected", used only when the VT has a
+		/// permanent ESC means; bits 1-3 undefined set to 0; bit 4 any other error), and bytes 5-8 reserved
+		/// 0xFF. It is an operator input event the VT originates, not a response to a command, so like the
+		/// Pointing Event it bypasses the macro-response suppression choke point.
+		/// @param[in] abortedObjectId The Object ID where input was aborted, or NULL_OBJECT_ID when an error code is set
+		/// @param[in] errorBitfield The Annex H.10 byte 4 error bitfield (0 when input was aborted with no error)
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false
+		bool send_vt_esc_message(std::uint16_t abortedObjectId, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
+
 		/// @brief Sends the VT Change Numeric Value message
 		/// @details The VT sends this message any time the operator enters a numeric value for an input object or variable,
 		/// regardless of whether or not the value changed.This message is not sent if the input was aborted(in this case a VT ESC message would be sent instead).For input objects that have a numeric variable reference,
@@ -444,7 +458,7 @@ namespace isobus
 			InvalidObjectID = 0,
 			InvalidListIndex = 1,
 			InvalidNewListItemObjectID = 2,
-			Reserved = 3, ///< Set to zero
+			ValueInUse = 3, ///< Value in use (e.g. open for input); ISO 11783-6:2014 F.43, VT version 4 and later
 			AnyOtherError = 4
 		};
 
@@ -490,7 +504,7 @@ namespace isobus
 			InvalidObjectID = 1,
 			StringTooLong = 2,
 			AnyOtherError = 3,
-			Reserved = 4 ///< In VT version 4 and 5 this bit was "value in use" but that is now deprecated
+			ValueInUse = 4 ///< Value in use (e.g. open for input); ISO 11783-6:2014 F.25, VT version 4 and 5 (deprecated in later editions)
 		};
 
 		/// @brief Enumerates the different error bit indices that can be set in a delete version response
@@ -1227,6 +1241,20 @@ namespace isobus
 		/// @brief Returns whether the mask any managed working set currently shows is an Alarm Mask
 		/// @returns true if an Alarm Mask is the active mask of any managed working set
 		bool is_any_alarm_mask_active() const;
+
+		/// @brief Returns whether the given object is the one a working set currently has open for operator
+		/// input (ISO 11783-6 Table 5 Data-input state).
+		/// @details This is the choke point for Table 5's forced-abort and rejection rows: while an object is
+		/// open for input, commands that target that same object (Change Numeric Value, Change String Value,
+		/// Change Attribute, Change List Item, Enable/Disable, or a Select Input Object naming it) are refused
+		/// so the operator's open edit is not disturbed. It keys on the open-for-input object (set by a Select
+		/// Input Object command with option byte 0), not on a merely-focused object: Table 5's Navigating state
+		/// does not reject these commands. It compares the object's own ID and does not chase variable
+		/// indirection, per Table 5's "on the object that has focus".
+		/// @param[in] workingSet The working set whose open-for-input object is checked
+		/// @param[in] objectID The object ID the command targets
+		/// @returns true if the working set has objectID open for input, otherwise false
+		bool is_object_open_for_input(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet, std::uint16_t objectID) const;
 
 		/// @brief Returns the mask object a working set currently has active.
 		/// @details This is safe to call for a working set other than the one being served. It takes one

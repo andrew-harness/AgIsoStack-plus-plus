@@ -208,6 +208,39 @@ namespace isobus
 		return retVal;
 	}
 
+	bool VirtualTerminalServer::send_vt_esc_message(std::uint16_t abortedObjectId, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+				static_cast<std::uint8_t>(Function::VTESCMessage),
+				get_low_byte(abortedObjectId),
+				get_high_byte(abortedObjectId),
+				errorBitfield,
+				0xFF, // Reserved
+				0xFF, // Reserved
+				0xFF, // Reserved
+				0xFF // Reserved
+			};
+
+			// Like the Pointing Event, this goes onto the bus directly rather than through send_response,
+			// the choke point that withholds the VT's response to a command contained in a macro (clause
+			// 4.6.11.4 f). The VT ESC message is an operator input event the VT originates -- sent when the
+			// operator presses the ESC means, and when a Change Active Mask command closes an open input
+			// field (ISO 11783-6 H.10) -- not a response to any command, so it must not pass through that
+			// choke point.
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+			                                                        buffer.data(),
+			                                                        CAN_DATA_LENGTH,
+			                                                        serverInternalControlFunction,
+			                                                        destination,
+			                                                        get_priority());
+		}
+		return retVal;
+	}
+
 	void VirtualTerminalServer::mark_status_message_changed()
 	{
 		statusMessagePending = true;
@@ -336,6 +369,13 @@ namespace isobus
 			}
 		}
 		return retVal;
+	}
+
+	bool VirtualTerminalServer::is_object_open_for_input(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet, std::uint16_t objectID) const
+	{
+		return (nullptr != workingSet) &&
+		  (NULL_OBJECT_ID != objectID) &&
+		  (objectID == workingSet->get_object_open_for_input());
 	}
 
 	void VirtualTerminalServer::stamp_alarm_activation_sequences()

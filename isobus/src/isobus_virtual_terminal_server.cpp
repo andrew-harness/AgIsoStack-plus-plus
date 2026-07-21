@@ -841,6 +841,17 @@ namespace isobus
 			{
 				const auto value = get_little_endian_uint32(data, 4);
 				auto objectId = get_little_endian_uint16(data, 1);
+
+				// ISO 11783-6 Table 5, Data-input state: a Change Numeric Value command on the object that
+				// is open for input is refused with "the object is in use" (F.23 byte 4 bit 2), leaving the
+				// open edit untouched. Only the object's own ID is guarded, not a variable it references.
+				if (is_object_open_for_input(managedWorkingSet, objectId))
+				{
+					send_change_numeric_value_response(objectId, get_bit(static_cast<std::uint8_t>(ChangeNumericValueErrorBit::ValueInUse)), value, managedWorkingSet->get_control_function());
+					LOG_WARNING("[VT Server]: Client %u change numeric value on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), objectId);
+					break;
+				}
+
 				auto lTargetObject = managedWorkingSet->get_object_by_id(objectId);
 				bool logSuccess = true;
 
@@ -1005,6 +1016,18 @@ namespace isobus
 			case Function::EnableDisableObjectCommand:
 			{
 				auto objectId = get_little_endian_uint16(data, 1);
+
+				// ISO 11783-6 Table 5, Data-input state: disabling the object that is open for input is
+				// refused with "operator input is active on this object" (F.5 byte 5 bit 3); the object
+				// stays enabled and keeps focus. Only a disable (byte 4 = 0) is refused -- enabling an
+				// already-enabled open object is the no-op F.4 requires to answer with no error.
+				if ((0 == data[3]) && is_object_open_for_input(managedWorkingSet, objectId))
+				{
+					send_enable_disable_object_response(objectId, get_bit(static_cast<std::uint8_t>(EnableDisableObjectErrorBit::CouldNotCompleteTheInputObjectIsCurrentlyBeingModified)), (0 != data[3]), managedWorkingSet->get_control_function());
+					LOG_WARNING("[VT Server]: Client %u disable object %u refused: operator input is active on it", managedWorkingSet->get_control_function()->get_address(), objectId);
+					break;
+				}
+
 				auto lTargetObject = managedWorkingSet->get_object_by_id(objectId);
 
 				if (nullptr != lTargetObject)
@@ -1199,6 +1222,17 @@ namespace isobus
 			case Function::ChangeStringValueCommand:
 			{
 				auto objectIdToChange = get_little_endian_uint16(data, 1);
+
+				// ISO 11783-6 Table 5, Data-input state: a Change String Value command on the object that is
+				// open for input is refused with "the object is in use". At VT version 5 that is F.25 byte 6
+				// bit 4 (the bit was withdrawn in later editions; we target VT 5).
+				if (is_object_open_for_input(managedWorkingSet, objectIdToChange))
+				{
+					send_change_string_value_response(objectIdToChange, get_bit(static_cast<std::uint8_t>(ChangeStringValueErrorBit::ValueInUse)), message.get_source_control_function());
+					LOG_WARNING("[VT Server]: Client %u change string value on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+					break;
+				}
+
 				auto numberOfBytesInString = get_little_endian_uint16(data, 3);
 				auto stringObject = managedWorkingSet->get_object_by_id(objectIdToChange);
 
@@ -1420,6 +1454,16 @@ namespace isobus
 				const auto attributeData = get_little_endian_uint32(data, 4);
 				VTObject::AttributeError errorCode = VTObject::AttributeError::AnyOtherError;
 
+				// ISO 11783-6 Table 5, Data-input state: a Change Attribute command on the object that is open
+				// for input is refused with "the object is in use" (F.39 byte 5 bit 3), leaving the open edit
+				// untouched. 4.2 also protects the value being composed, so nothing is written.
+				if (is_object_open_for_input(managedWorkingSet, objectID))
+				{
+					send_change_attribute_response(objectID, get_bit(static_cast<std::uint8_t>(VTObject::AttributeError::ValueInUse)), data.at(3), message.get_source_control_function());
+					LOG_WARNING("[VT Server]: Client %u change attribute %u on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), attributeID, objectID);
+					break;
+				}
+
 				if ((NULL_OBJECT_ID != objectID) && (nullptr != targetObject))
 				{
 					// The snapshot is held in a named local for the duration of the call that reads it,
@@ -1540,6 +1584,17 @@ namespace isobus
 				auto objectID = get_little_endian_uint16(data, 1);
 				auto newObjectID = get_little_endian_uint16(data, 4);
 				auto listIndex = data[3];
+
+				// ISO 11783-6 Table 5, Data-input state: a Change List Item command on the list that is open
+				// for input is refused with "the object is in use" (F.43 byte 7 bit 3), leaving the open edit
+				// untouched.
+				if (is_object_open_for_input(managedWorkingSet, objectID))
+				{
+					send_change_list_item_response(objectID, newObjectID, get_bit(static_cast<std::uint8_t>(ChangeListItemErrorBit::ValueInUse)), listIndex, message.get_source_control_function());
+					LOG_WARNING("[VT Server]: Client %u change list item on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), objectID);
+					break;
+				}
+
 				auto targetObject = managedWorkingSet->get_object_by_id(objectID);
 				auto newObject = managedWorkingSet->get_object_by_id(newObjectID);
 
@@ -1863,6 +1918,19 @@ namespace isobus
 			{
 				auto objectID = get_little_endian_uint16(data, 1);
 				auto targetObject = managedWorkingSet->get_object_by_id(objectID);
+
+				// ISO 11783-6 Table 5, Data-input state: a Select Input Object command that names an object
+				// other than the one open for input is refused with "another input field is currently being
+				// entered" (F.7 byte 5 bit 3), leaving focus and the open edit unchanged. A command that names
+				// the object already open (a re-select of the same object) is not rejected here and falls
+				// through to the normal handling below.
+				const std::uint16_t openForInputObjectID = managedWorkingSet->get_object_open_for_input();
+				if ((nullptr != targetObject) && (NULL_OBJECT_ID != openForInputObjectID) && (openForInputObjectID != objectID))
+				{
+					send_select_input_object_response(objectID, get_bit(static_cast<std::uint8_t>(SelectInputObjectErrorBit::CouldNotCompleteAnotherFieldIsBeingModified)), SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError, message.get_source_control_function());
+					LOG_WARNING("[VT Server]: Client %u select input object %u refused: object %u is currently being entered", managedWorkingSet->get_control_function()->get_address(), objectID, openForInputObjectID);
+					break;
+				}
 
 				if (nullptr != targetObject)
 				{

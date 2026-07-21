@@ -190,6 +190,7 @@ namespace isobus
 			InvalidObjectID = 0,
 			InvalidAttributeID = 1,
 			InvalidValue = 2,
+			ValueInUse = 3, ///< Value in use (e.g. open for input); ISO 11783-6:2014 F.39, VT version 4 and later
 			AnyOtherError = 4
 		};
 
