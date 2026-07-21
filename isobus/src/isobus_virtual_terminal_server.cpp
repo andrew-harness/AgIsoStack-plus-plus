@@ -4515,11 +4515,20 @@ namespace isobus
 		// to another working set permanently, because the tail of this function then records that one
 		// as the last Data Mask holder. The parse-completion path re-arbitrates, and a working set
 		// left in Fail is torn down within the same update() call, so this holds for at most one pass.
+		//
+		// The outstanding-parse test keys on the parse thread handle, not the processing state, because
+		// the state trails the handle at the start of a parse: start_parsing_thread() returns on the CAN
+		// thread before the worker records Running, so between those two points the parse is outstanding
+		// while the state still reads None. A Load Version empties the published tree before its reparse,
+		// so an incumbent caught in that None window resolves no active mask and the state test alone
+		// would let it be deselected. The handle is written only on the CAN thread and is set the instant
+		// the worker is spawned, so it has no such gap and closes that window.
 		if (nullptr != activeWorkingSet)
 		{
 			const auto activeState = activeWorkingSet->get_object_pool_processing_state();
 
-			if ((VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Running == activeState) ||
+			if (activeWorkingSet->is_object_pool_parse_outstanding() ||
+			    (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Running == activeState) ||
 			    (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Fail == activeState))
 			{
 				return;
