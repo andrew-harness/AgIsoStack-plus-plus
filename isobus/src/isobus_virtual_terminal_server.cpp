@@ -1169,11 +1169,43 @@ namespace isobus
 				{
 					if (newActiveMaskObjectIsValid)
 					{
+						const std::uint16_t oldActiveMaskObjectId = std::static_pointer_cast<WorkingSet>(workingSetObject)->get_active_mask();
 						std::static_pointer_cast<WorkingSet>(workingSetObject)->set_active_mask(newActiveMaskObjectId);
 
-						// An input field open for input belongs to the mask that was visible. Moving to
-						// another mask ends that input, so ESC must not report the field as still open.
-						managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
+						// ISO 11783-6 Table 5, Data-input rows: a Change Active Mask command while an object
+						// is open for operator input forces that input closed, and the row's responses "shall
+						// be sent in the indicated sequence" -- VT ESC message, then VT Select Input Object
+						// (loses focus), then the Change Active Mask response (sent below), then the VT Status
+						// message (raised by the arbitration that follows this block). H.10's second sentence
+						// makes the VT ESC obligatory here: it is sent "when the VT closes an open input field
+						// due to a Change Active Mask command". H.8's note that the selection message is
+						// withheld when the Working Set requested the focus change with the Select Input Object
+						// COMMAND does not apply -- a mask change is not that command -- so the deselect IS
+						// sent. This VT sets no initial focus (proprietary), so no "gains focus" selection
+						// follows. The Navigating-state row (no open input, a merely-focused object) sends only
+						// the deselect. These precede the Change Active Mask response so the wire order matches
+						// the indicated sequence.
+						//
+						// The row binds "only if new mask is a new Data Mask, or if the new mask is an Alarm
+						// Mask and the VT does not store the state of the input object" (this VT stores none).
+						// A re-select of the mask already active -- the refresh idiom the mask-lock release
+						// below also special-cases -- changes no mask and must not disturb an open edit.
+						const std::uint16_t openForInputBeforeMaskChange = managedWorkingSet->get_object_open_for_input();
+						if (newActiveMaskObjectId != oldActiveMaskObjectId)
+						{
+							if (NULL_OBJECT_ID != openForInputBeforeMaskChange)
+							{
+								send_vt_esc_message(openForInputBeforeMaskChange, 0, managedWorkingSet->get_control_function());
+								send_select_input_object_message(openForInputBeforeMaskChange, false, false, managedWorkingSet->get_control_function());
+								managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
+								managedWorkingSet->set_object_focus(NULL_OBJECT_ID);
+							}
+							else if (NULL_OBJECT_ID != managedWorkingSet->get_object_focus())
+							{
+								send_select_input_object_message(managedWorkingSet->get_object_focus(), false, false, managedWorkingSet->get_control_function());
+								managedWorkingSet->set_object_focus(NULL_OBJECT_ID);
+							}
+						}
 
 						// F.46 releases a mask lock when the locked mask goes from visible to hidden, and
 						// requires an unsolicited response saying so. The release is conditioned on the
