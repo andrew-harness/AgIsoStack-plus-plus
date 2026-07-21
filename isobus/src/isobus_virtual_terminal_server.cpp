@@ -616,17 +616,8 @@ namespace isobus
 				break;
 
 			case Function::GetSupportedObjectsMessage:
-			{
-				// D.14/D.15 is a Get Technical Data query about the VT itself, like Get Hardware and
-				// Get Memory beside it, and its answer does not depend on any object pool. Answering
-				// it here rather than from the connection-dependent path lets a control function ask
-				// before it has uploaded anything -- which is when a working set actually wants to
-				// know, since the answer decides what it puts in the pool.
-				LOG_DEBUG("[VT Server]: Client at address %u requested the supported object list.", message.get_identifier().get_source_address());
-				send_supported_objects(message.get_source_control_function());
-				retVal = true;
-			}
-			break;
+				retVal = handle_get_supported_objects_message(message);
+				break;
 
 			default:
 				break;
@@ -722,264 +713,20 @@ namespace isobus
 			break;
 
 			case Function::ExtendedGetVersionsMessage:
-			{
-				auto versions = get_extended_versions(message.get_source_control_function()->get_NAME());
-
-				std::vector<std::uint8_t> buffer;
-				buffer.push_back(static_cast<std::uint8_t>(Function::ExtendedGetVersionsMessage));
-
-				LOG_DEBUG("[VT Server]: Client %u requests stored extended versions", message.get_source_control_function()->get_address());
-
-				if (versions.size() > 255)
-				{
-					LOG_WARNING("[VT Server]: get_extended_versions returned too many versions! This client should really delete some.");
-				}
-
-				buffer.push_back(static_cast<std::uint8_t>(versions.size() & 0xFF));
-
-				for (const auto &version : versions)
-				{
-					for (const auto &versionByte : version)
-					{
-						buffer.push_back(versionByte);
-					}
-				}
-
-				while (buffer.size() < CAN_DATA_LENGTH)
-				{
-					buffer.push_back(0xFF);
-				}
-				CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-				                                               buffer.data(),
-				                                               static_cast<std::uint32_t>(buffer.size()),
-				                                               serverInternalControlFunction,
-				                                               message.get_source_control_function(),
-				                                               get_priority());
-			}
-			break;
+				handle_extended_get_versions_message(message);
+				break;
 
 			case Function::ExtendedStoreVersionCommand:
-			{
-				if (data.size() < static_cast<std::size_t>(EXTENDED_VERSION_LABEL_LENGTH) + 1u)
-				{
-					LOG_WARNING("[VT Server]: Received a malformed Extended Store Version command (too short to contain a 32 byte label)");
-					break;
-				}
-
-				if (managedWorkingSet->get_any_object_pools())
-				{
-					std::ostringstream nameString;
-					nameString << std::hex << std::setfill('0') << std::setw(16) << managedWorkingSet->get_control_function()->get_NAME().get_full_name();
-					std::vector<std::uint8_t> versionLabel;
-					bool allPoolsSaved = true;
-					versionLabel.reserve(EXTENDED_VERSION_LABEL_LENGTH);
-
-					for (std::uint_fast8_t i = 0; i < EXTENDED_VERSION_LABEL_LENGTH; i++)
-					{
-						versionLabel.push_back(data[i + 1]);
-					}
-
-					// The object pool arrives as one or more object-aligned components; concatenate them
-					// into a single stream stored under one key. save_version names the file by the version
-					// label, so saving each component separately would overwrite all but the last, and a
-					// multi-component pool would reload incomplete -- objects referencing the dropped
-					// components then dangle when the loaded pool is activated.
-					std::vector<std::uint8_t> combinedPool;
-					for (std::size_t i = 0; i < managedWorkingSet->get_number_iop_files(); i++)
-					{
-						const std::vector<std::uint8_t> &component = managedWorkingSet->get_iop_raw_data(i);
-						combinedPool.insert(combinedPool.end(), component.begin(), component.end());
-					}
-
-					allPoolsSaved = save_version(combinedPool, versionLabel, message.get_source_control_function()->get_NAME());
-					if (allPoolsSaved)
-					{
-						LOG_INFO("[VT Server]: Object pool for NAME " + nameString.str() + " was stored.");
-					}
-					else
-					{
-						LOG_ERROR("[VT Server]: Object pool for NAME " + nameString.str() + " could not be stored.");
-					}
-
-					std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = { 0 };
-					buffer[0] = static_cast<std::uint8_t>(Function::ExtendedStoreVersionCommand);
-					buffer[1] = 0xFF; // Reserved
-					buffer[2] = 0xFF; // Reserved
-					buffer[3] = 0xFF; // Reserved
-					buffer[4] = 0xFF; // Reserved
-					if (allPoolsSaved)
-					{
-						buffer[5] = 0; // No error
-					}
-					else
-					{
-						// E.13 byte 6 bit 3, "Any other error": the generic error for a save_version write
-						// failure, which is none of bit 1 (bad version label) or bit 2 (insufficient memory);
-						// bit 0 is reserved.
-						buffer[5] = get_bit(static_cast<std::uint8_t>(StoreVersionErrorBit::AnyOtherError));
-					}
-					buffer[6] = 0xFF; // Reserved
-					buffer[7] = 0xFF; // Reserved
-					CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-					                                               buffer.data(),
-					                                               CAN_DATA_LENGTH,
-					                                               serverInternalControlFunction,
-					                                               message.get_source_control_function(),
-					                                               get_priority());
-				}
-				else
-				{
-					// Whomever this is appears to be behaving badly, send them a NACK
-					send_acknowledgement(AcknowledgementType::Negative, static_cast<std::uint32_t>(CANLibParameterGroupNumber::ECUtoVirtualTerminal), serverInternalControlFunction, managedWorkingSet->get_control_function());
-				}
-			}
-			break;
+				handle_extended_store_version_command(message, data, managedWorkingSet);
+				break;
 
 			case Function::ExtendedDeleteVersionCommand:
-			{
-				if (data.size() < static_cast<std::size_t>(EXTENDED_VERSION_LABEL_LENGTH) + 1u)
-				{
-					LOG_WARNING("[VT Server]: Received a malformed Extended Delete Version command (too short to contain a 32 byte label)");
-					break;
-				}
-
-				std::vector<std::uint8_t> versionLabel;
-				std::ostringstream nameString;
-				nameString << std::hex << std::setfill('0') << std::setw(16) << managedWorkingSet->get_control_function()->get_NAME().get_full_name();
-				versionLabel.reserve(EXTENDED_VERSION_LABEL_LENGTH);
-
-				for (std::uint_fast8_t i = 0; i < EXTENDED_VERSION_LABEL_LENGTH; i++)
-				{
-					versionLabel.push_back(data[i + 1]);
-				}
-
-				bool wasDeleted = delete_version(versionLabel, managedWorkingSet->get_control_function()->get_NAME());
-
-				if (wasDeleted)
-				{
-					LOG_INFO("[VT Server]: Deleted an extended object pool version for client NAME %s", nameString.str().c_str());
-				}
-				else
-				{
-					LOG_WARNING("[VT Server]: Extended delete version failed for client NAME %s", nameString.str().c_str());
-				}
-
-				const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
-					static_cast<std::uint8_t>(Function::ExtendedDeleteVersionCommand),
-					0xFF, // Reserved
-					0xFF, // Reserved
-					0xFF, // Reserved
-					0xFF, // Reserved
-					static_cast<std::uint8_t>(wasDeleted ? 0 : get_bit(static_cast<std::uint8_t>(DeleteVersionErrorBit::VersionLabelNotCorrectOrUnknown))),
-					0xFF, // Reserved
-					0xFF // Reserved
-				};
-				CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-				                                               buffer.data(),
-				                                               CAN_DATA_LENGTH,
-				                                               serverInternalControlFunction,
-				                                               message.get_source_control_function(),
-				                                               get_priority());
-			}
-			break;
+				handle_extended_delete_version_command(message, data, managedWorkingSet);
+				break;
 
 			case Function::ExtendedLoadVersionCommand:
-			{
-				if (data.size() < static_cast<std::size_t>(EXTENDED_VERSION_LABEL_LENGTH) + 1u)
-				{
-					LOG_WARNING("[VT Server]: Received a malformed Extended Load Version command (too short to contain a 32 byte label)");
-					break;
-				}
-
-				if (managedWorkingSet->is_object_pool_parse_outstanding())
-				{
-					// Loading a version appends the stored pool to the raw chunk buffer the parse worker
-					// is iterating, which can reallocate it under a live element reference, and it would
-					// then have to start a parse that cannot be started while one is outstanding. So the
-					// command is refused. E.15 byte 6 bit 3, "Any other error", is the bit for it: the VT
-					// is busy, which is none of the file system, version label or memory faults the other
-					// three bits name.
-					//
-					// A conformant client cannot see this. E.14 requires the working set master to wait
-					// for the Extended Load Version response, and until then to watch the VT Status
-					// busy-parsing bit, before assuming its command was lost.
-					send_extended_load_version_response(get_bit(static_cast<std::uint8_t>(LoadVersionErrorBit::AnyOtherError)), managedWorkingSet->get_control_function());
-					LOG_WARNING("[VT Server]: Client at address %u sent an Extended Load Version command while its object pool is still being parsed. Refusing it.", message.get_identifier().get_source_address());
-					break;
-				}
-
-				std::vector<std::uint8_t> versionLabel;
-
-				versionLabel.reserve(EXTENDED_VERSION_LABEL_LENGTH);
-
-				for (std::uint_fast8_t i = 0; i < EXTENDED_VERSION_LABEL_LENGTH; i++)
-				{
-					versionLabel.push_back(data[i + 1]);
-				}
-
-				auto loadedVersion = load_version(versionLabel, message.get_source_control_function()->get_NAME());
-				if (!loadedVersion.empty())
-				{
-					// E.6: "If an object pool is already loaded it is overwritten." Returning the working
-					// set to its pre-upload state before loading makes the stored version parse into a
-					// clean tree that replaces the current pool, rather than the parse worker merging it
-					// into the live tree (merging is correct only for a runtime pool update, C.2.6). The
-					// reset also discards the state derived from the pool being replaced -- the mask lock,
-					// the Colour Map selection, the alarm activation sequence, open-for-input and focus --
-					// which the new pool's parse repopulates. Nothing between here and that parse reads
-					// them. The reset fails only while a parse is outstanding, and the guard at the top of
-					// this case already returned in that state, so it cannot fail here; the false branch
-					// refuses the load rather than let add_iop_raw_data race a live parse worker.
-					if (managedWorkingSet->reset_object_pool())
-					{
-						managedWorkingSet->set_iop_size(static_cast<std::uint32_t>(loadedVersion.size()));
-						managedWorkingSet->add_iop_raw_data(loadedVersion);
-
-						// A parse belongs to a load that produced something to parse. Started outside this
-						// branch it would also run when no version was found -- on a working set that still
-						// holds an earlier pool, a parse of zero new chunks that succeeds and sends a second,
-						// contradicting response saying the version loaded.
-						//
-						// The two flags select the message that completes this parse, so they describe a
-						// parse this call actually started and nothing else. Set after a start that did not
-						// happen, they would redirect the completion of whatever parse is already
-						// outstanding, answering a client waiting on an End of Object Pool response with an
-						// Extended Load Version response instead.
-						if (managedWorkingSet->start_parsing_thread())
-						{
-							managedWorkingSet->set_was_object_pool_loaded_from_non_volatile_memory(true, {});
-							managedWorkingSet->set_loaded_via_extended_version_command(true, {});
-							LOG_DEBUG("[VT Server]: Starting parsing thread for loaded extended pool data.");
-						}
-					}
-					else
-					{
-						send_extended_load_version_response(get_bit(static_cast<std::uint8_t>(LoadVersionErrorBit::AnyOtherError)), managedWorkingSet->get_control_function());
-						LOG_ERROR("[VT Server]: Could not reset the object pool before an Extended Load Version; a parse is unexpectedly outstanding. Refusing the load.");
-					}
-				}
-				else
-				{
-					const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
-						static_cast<std::uint8_t>(Function::ExtendedLoadVersionCommand),
-						0xFF, // Reserved
-						0xFF, // Reserved
-						0xFF, // Reserved
-						0xFF, // Reserved
-						get_bit(static_cast<std::uint8_t>(LoadVersionErrorBit::VersionLabelNotCorrectOrUnknown)), // E.15 byte 6 bit 1: requested version not in non-volatile storage
-						0xFF, // Reserved
-						0xFF // Reserved
-					};
-					CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-					                                               buffer.data(),
-					                                               CAN_DATA_LENGTH,
-					                                               serverInternalControlFunction,
-					                                               message.get_source_control_function(),
-					                                               get_priority());
-					LOG_ERROR("[VT Server]: Failed to load requested extended object pool version");
-				}
-			}
-			break;
+				handle_extended_load_version_command(message, data, managedWorkingSet);
+				break;
 
 			case Function::LoadVersionCommand:
 			{
@@ -1554,69 +1301,12 @@ namespace isobus
 			break;
 
 			case Function::SelectColourMapCommand:
-			{
-				auto objectId = get_little_endian_uint16(data, 1);
-
-				if (NULL_OBJECT_ID == objectId)
-				{
-					managedWorkingSet->set_active_colour_map_object_id(NULL_OBJECT_ID, {});
-					send_select_colour_map_response(objectId, 0, managedWorkingSet->get_control_function());
-					dispatch_repaint(managedWorkingSet);
-					LOG_DEBUG("[VT Server]: Client %u select colour map command restored the default palette", managedWorkingSet->get_control_function()->get_address());
-				}
-				else
-				{
-					auto object = managedWorkingSet->get_object_by_id(objectId);
-
-					if (nullptr == object)
-					{
-						send_select_colour_map_response(objectId, get_bit(static_cast<std::uint8_t>(SelectColourMapErrorBit::InvalidObjectID)), managedWorkingSet->get_control_function());
-						LOG_WARNING("[VT Server]: Client %u select colour map failed because the object ID %u doesn't exist", managedWorkingSet->get_control_function()->get_address(), objectId);
-					}
-					else if (VirtualTerminalObjectType::ColourMap != object->get_object_type())
-					{
-						send_select_colour_map_response(objectId, get_bit(static_cast<std::uint8_t>(SelectColourMapErrorBit::InvalidColourMap)), managedWorkingSet->get_control_function());
-						LOG_WARNING("[VT Server]: Client %u select colour map failed because the object ID %u is not a Colour Map", managedWorkingSet->get_control_function()->get_address(), objectId);
-					}
-					else
-					{
-						managedWorkingSet->set_active_colour_map_object_id(objectId, {});
-						send_select_colour_map_response(objectId, 0, managedWorkingSet->get_control_function());
-						dispatch_repaint(managedWorkingSet);
-						LOG_DEBUG("[VT Server]: Client %u selected colour map object %u", managedWorkingSet->get_control_function()->get_address(), objectId);
-					}
-				}
-			}
-			break;
+				handle_select_colour_map_command(data, managedWorkingSet);
+				break;
 
 			case Function::GetAttributeValueMessage:
-			{
-				auto objectId = get_little_endian_uint16(data, 1);
-				std::uint8_t attributeId = data[3];
-				auto object = managedWorkingSet->get_object_by_id(objectId);
-
-				if (nullptr == object)
-				{
-					send_get_attribute_value_response(objectId, attributeId, 0, get_bit(static_cast<std::uint8_t>(GetAttributeValueErrorBit::InvalidObjectID)), managedWorkingSet->get_control_function());
-					LOG_WARNING("[VT Server]: Client %u get attribute value failed because the object ID %u doesn't exist", managedWorkingSet->get_control_function()->get_address(), objectId);
-				}
-				else
-				{
-					std::uint32_t attributeValue = 0;
-
-					if (object->get_attribute(attributeId, attributeValue))
-					{
-						send_get_attribute_value_response(objectId, attributeId, attributeValue, 0, managedWorkingSet->get_control_function());
-						LOG_DEBUG("[VT Server]: Client %u read attribute %u of object %u as %u", managedWorkingSet->get_control_function()->get_address(), attributeId, objectId, attributeValue);
-					}
-					else
-					{
-						send_get_attribute_value_response(objectId, attributeId, 0, get_bit(static_cast<std::uint8_t>(GetAttributeValueErrorBit::InvalidAttributeID)), managedWorkingSet->get_control_function());
-						LOG_WARNING("[VT Server]: Client %u get attribute value failed because object %u has no attribute %u", managedWorkingSet->get_control_function()->get_address(), objectId, attributeId);
-					}
-				}
-			}
-			break;
+				handle_get_attribute_value_message(data, managedWorkingSet);
+				break;
 
 			case Function::ChangeStringValueCommand:
 			{
@@ -2573,314 +2263,24 @@ namespace isobus
 			break;
 
 			case Function::ChangeEndPointCommand:
-			{
-				auto objectID = get_little_endian_uint16(data, 1);
-				const std::uint16_t newWidth = get_little_endian_uint16(data, 3);
-				const std::uint16_t newHeight = get_little_endian_uint16(data, 5);
-				const std::uint8_t lineDirection = data[7];
-				auto targetObject = managedWorkingSet->get_object_by_id(objectID);
-
-				// This chain validates both the target and the direction before the final branch writes
-				// any attribute, so a rejected command leaves the output line exactly as it was.
-				if ((nullptr == targetObject) || (VirtualTerminalObjectType::OutputLine != targetObject->get_object_type()))
-				{
-					LOG_WARNING("[VT Server]: Client %u change end point: object id %u is not an output line in this pool", managedWorkingSet->get_control_function()->get_address(), objectID);
-					send_change_end_point_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeEndPointErrorBit::InvalidObjectID)), managedWorkingSet->get_control_function());
-				}
-				else if (lineDirection > 1)
-				{
-					LOG_WARNING("[VT Server]: Client %u change end point: line direction %u is not valid for object %u", managedWorkingSet->get_control_function()->get_address(), lineDirection, objectID);
-					send_change_end_point_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeEndPointErrorBit::InvalidLineDirection)), managedWorkingSet->get_control_function());
-				}
-				else
-				{
-					auto line = std::static_pointer_cast<OutputLine>(targetObject);
-
-					line->set_width(newWidth);
-					line->set_height(newHeight);
-					line->set_line_direction(static_cast<OutputLine::LineDirection>(lineDirection));
-					send_change_end_point_response(objectID, 0, managedWorkingSet->get_control_function());
-					dispatch_repaint(managedWorkingSet);
-					process_macro(targetObject, EventID::OnChangeEndpoint, targetObject->get_object_type(), managedWorkingSet);
-					LOG_DEBUG("[VT Server]: Client %u change end point command: Object: %u, Width: %u, Height: %u, Direction: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight, lineDirection);
-				}
-			}
-			break;
+				handle_change_end_point_command(data, managedWorkingSet);
+				break;
 
 			case Function::ChangePolygonScaleCommand:
-			{
-				auto objectID = get_little_endian_uint16(data, 1);
-				const std::uint16_t newWidth = get_little_endian_uint16(data, 3);
-				const std::uint16_t newHeight = get_little_endian_uint16(data, 5);
-				auto targetObject = managedWorkingSet->get_object_by_id(objectID);
-
-				if ((nullptr == targetObject) || (VirtualTerminalObjectType::OutputPolygon != targetObject->get_object_type()))
-				{
-					LOG_WARNING("[VT Server]: Client %u change polygon scale: object id %u is not an output polygon in this pool", managedWorkingSet->get_control_function()->get_address(), objectID);
-					send_change_polygon_scale_response(objectID, newWidth, newHeight, get_bit(static_cast<std::uint8_t>(ChangePolygonScaleErrorBit::InvalidObjectID)), managedWorkingSet->get_control_function());
-				}
-				else
-				{
-					auto polygon = std::static_pointer_cast<OutputPolygon>(targetObject);
-
-					// The rescale in F.54 divides by the enclosing area the points were authored against,
-					// so both old dimensions must be read before either attribute takes its new value.
-					const std::uint16_t oldWidth = polygon->get_width();
-					const std::uint16_t oldHeight = polygon->get_height();
-
-					for (std::uint8_t i = 0; i < polygon->get_number_of_points(); i++)
-					{
-						const OutputPolygon::PolygonPoint point = polygon->get_point(i);
-						std::uint16_t scaledX = point.xValue;
-						std::uint16_t scaledY = point.yValue;
-
-						// PolygonPoint stores coordinates unsigned, so F.54's negative-coordinate branch cannot
-						// arise here and only the positive branch, which rounds to nearest, is implemented.
-						// The products reach 65535 * 65535, which overflows the signed 32 bit math F.54 names,
-						// so they are formed in 64 bits and the quotient is clamped back into the point's range.
-						// An enclosing area of zero has no scale factor to apply, so that axis keeps the
-						// coordinates it was authored with rather than being divided by zero. F.54 defines no
-						// error for a degenerate enclosing area and F.55 carries no bit for one, so the
-						// command still reports success.
-						if (0 != oldWidth)
-						{
-							const std::int64_t newX = ((static_cast<std::int64_t>(point.xValue) * newWidth) + (oldWidth / 2)) / oldWidth;
-							scaledX = static_cast<std::uint16_t>((newX > 65535) ? 65535 : newX);
-						}
-
-						if (0 != oldHeight)
-						{
-							const std::int64_t newY = ((static_cast<std::int64_t>(point.yValue) * newHeight) + (oldHeight / 2)) / oldHeight;
-							scaledY = static_cast<std::uint16_t>((newY > 65535) ? 65535 : newY);
-						}
-
-						polygon->change_point(i, scaledX, scaledY);
-					}
-
-					polygon->set_width(newWidth);
-					polygon->set_height(newHeight);
-					send_change_polygon_scale_response(objectID, newWidth, newHeight, 0, managedWorkingSet->get_control_function());
-
-					// Table B.32 maps this command to the On Refresh event, which the EventID enum documents as
-					// having no associated event ID because macros cannot be attached to it, so a repaint is the
-					// whole required behaviour and no macro is run.
-					dispatch_repaint(managedWorkingSet);
-					LOG_DEBUG("[VT Server]: Client %u change polygon scale command: Object: %u, Width: %u, Height: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight);
-				}
-			}
-			break;
+				handle_change_polygon_scale_command(data, managedWorkingSet);
+				break;
 
 			case Function::ESCCommand:
-			{
-				const std::uint16_t openObjectID = managedWorkingSet->get_object_open_for_input();
-
-				if (NULL_OBJECT_ID == openObjectID)
-				{
-					// F.9 defines bytes 2-3 only when no error is reported, so the standard's own
-					// "no object" sentinel is what this branch names.
-					send_esc_response(NULL_OBJECT_ID, get_bit(static_cast<std::uint8_t>(ESCErrorBit::NoInputFieldIsOpenForInput)), managedWorkingSet->get_control_function());
-					LOG_DEBUG("[VT Server]: Client %u ESC command: no input field is open for input, ESC ignored", managedWorkingSet->get_control_function()->get_address());
-				}
-				else
-				{
-					// must be cleared before process_macro: Select Input Object is an allowed macro
-					// command, so an OnESC macro may re-open an object for input, and that re-open has
-					// to survive this handler rather than being cleared after it.
-					managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
-					send_esc_response(openObjectID, 0, managedWorkingSet->get_control_function());
-					LOG_DEBUG("[VT Server]: Client %u ESC command: input aborted on object %u", managedWorkingSet->get_control_function()->get_address(), openObjectID);
-
-					auto targetObject = managedWorkingSet->get_object_by_id(openObjectID);
-
-					// A runtime object pool update can replace whatever occupies this object ID.
-					if (nullptr != targetObject)
-					{
-						process_macro(targetObject, EventID::OnESC, targetObject->get_object_type(), managedWorkingSet);
-					}
-				}
-			}
-			break;
+				handle_esc_command(managedWorkingSet);
+				break;
 
 			case Function::LockUnlockMaskCommand:
-			{
-				// F.46 byte 2 selects between the two operations this command performs.
-				constexpr std::uint8_t UNLOCK_MASK = 0;
-				constexpr std::uint8_t LOCK_MASK = 1;
-
-				const std::uint8_t command = data[1];
-				const std::uint16_t objectID = get_little_endian_uint16(data, 2);
-				const std::uint16_t timeout_ms = get_little_endian_uint16(data, 4);
-
-				// F.46 bytes 3-4 must name the mask the operator can actually see, which is the active
-				// working set's own active mask. A working set that is not the active one shows nothing,
-				// so its lock target can never match.
-				std::uint16_t visibleMaskObjectID = NULL_OBJECT_ID;
-
-				if (activeWorkingSet == managedWorkingSet)
-				{
-					auto workingSetObject = managedWorkingSet->get_working_set_object();
-
-					if (nullptr != workingSetObject)
-					{
-						visibleMaskObjectID = std::static_pointer_cast<WorkingSet>(workingSetObject)->get_active_mask();
-					}
-				}
-
-				const bool namesTheVisibleMask = (NULL_OBJECT_ID != visibleMaskObjectID) && (objectID == visibleMaskObjectID);
-				const bool isLocked = (NULL_OBJECT_ID != managedWorkingSet->get_mask_lock_object_id());
-
-				if (LOCK_MASK == command)
-				{
-					if (!namesTheVisibleMask)
-					{
-						send_lock_unlock_mask_response(command, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::CommandIgnoredNoMaskVisibleOrObjectIDMismatch)), false, managedWorkingSet->get_control_function());
-						LOG_WARNING("[VT Server]: Client %u lock mask command ignored: object %u is not the visible mask", managedWorkingSet->get_control_function()->get_address(), objectID);
-					}
-					else if (is_any_alarm_mask_active())
-					{
-						// F.46 rejects the lock when an Alarm Mask from any working set is active and is in
-						// the same display area. A single display area is the only topology this server
-						// supports, so every active Alarm Mask shares the area with the mask being locked.
-						send_lock_unlock_mask_response(command, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::LockIgnoredAlarmMaskIsActive)), false, managedWorkingSet->get_control_function());
-						LOG_WARNING("[VT Server]: Client %u lock mask command ignored: an alarm mask is active", managedWorkingSet->get_control_function()->get_address());
-					}
-					else if (isLocked)
-					{
-						send_lock_unlock_mask_response(command, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::LockIgnoredAlreadyLocked)), false, managedWorkingSet->get_control_function());
-						LOG_WARNING("[VT Server]: Client %u lock mask command ignored: mask %u is already locked", managedWorkingSet->get_control_function()->get_address(), objectID);
-					}
-					else
-					{
-						managedWorkingSet->set_mask_lock(objectID, timeout_ms, SystemTiming::get_timestamp_ms(), {});
-						send_lock_unlock_mask_response(command, 0, false, managedWorkingSet->get_control_function());
-						LOG_DEBUG("[VT Server]: Client %u locked mask %u with a timeout of %u ms", managedWorkingSet->get_control_function()->get_address(), objectID, timeout_ms);
-					}
-				}
-				else if (UNLOCK_MASK == command)
-				{
-					if (!namesTheVisibleMask)
-					{
-						// F.46 answers an unlock aimed at a hidden mask immediately and reports it ignored.
-						send_lock_unlock_mask_response(command, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::CommandIgnoredNoMaskVisibleOrObjectIDMismatch)), false, managedWorkingSet->get_control_function());
-						LOG_WARNING("[VT Server]: Client %u unlock mask command ignored: object %u is not the visible mask", managedWorkingSet->get_control_function()->get_address(), objectID);
-					}
-					else if (!isLocked)
-					{
-						send_lock_unlock_mask_response(command, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::UnlockIgnoredNotLocked)), false, managedWorkingSet->get_control_function());
-						LOG_WARNING("[VT Server]: Client %u unlock mask command ignored: mask %u is not locked", managedWorkingSet->get_control_function()->get_address(), objectID);
-					}
-					else
-					{
-						// must clear the lock before the repaint, and repaint before the response: F.46
-						// forbids answering the unlock until the mask has been completely refreshed, and
-						// dispatch_repaint withholds that refresh for as long as the lock is held. The
-						// repaint runs synchronously on this thread, so it has completed by the time the
-						// response reaches the bus.
-						managedWorkingSet->set_mask_lock(NULL_OBJECT_ID, 0, 0, {});
-						dispatch_repaint(managedWorkingSet);
-						send_lock_unlock_mask_response(command, 0, false, managedWorkingSet->get_control_function());
-						LOG_DEBUG("[VT Server]: Client %u unlocked mask %u", managedWorkingSet->get_control_function()->get_address(), objectID);
-					}
-				}
-				else
-				{
-					send_lock_unlock_mask_response(command, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::AnyOtherError)), false, managedWorkingSet->get_control_function());
-					LOG_WARNING("[VT Server]: Client %u lock/unlock mask command has an invalid command byte of %u", managedWorkingSet->get_control_function()->get_address(), command);
-				}
-			}
-			break;
+				handle_lock_unlock_mask_command(data, managedWorkingSet);
+				break;
 
 			case Function::ChangeObjectLabelCommand:
-			{
-				const std::uint16_t objectID = get_little_endian_uint16(data, 1);
-				const std::uint16_t stringVariableID = get_little_endian_uint16(data, 3);
-				const std::uint8_t fontType = data[5];
-				const std::uint16_t graphicObjectID = get_little_endian_uint16(data, 6);
-
-				// F.51's byte 2 is a bitfield rather than a single error code, so every problem the command
-				// has is accumulated and reported at once instead of returning on the first one found.
-				std::uint8_t errorBitfield = 0;
-
-				// Every lookup here goes through one snapshot of the object tree rather than repeated
-				// get_object_by_id calls. This command carries three object IDs a working set may get
-				// wrong, and taking them all from the same snapshot means they are all answered against
-				// the same pool even if a run-time pool update publishes a new one part-way through.
-				const auto objectTree = managedWorkingSet->get_object_tree();
-
-				auto find_object = [&objectTree](std::uint16_t idToFind) -> std::shared_ptr<VTObject> {
-					auto foundObject = objectTree->find(idToFind);
-					return ((objectTree->end() == foundObject) ? nullptr : foundObject->second);
-				};
-
-				std::shared_ptr<ObjectLabelReferenceList> labelReferenceList;
-
-				for (const auto &currentObject : *objectTree)
-				{
-					if ((nullptr != currentObject.second) &&
-					    (VirtualTerminalObjectType::ObjectLabelRefrenceList == currentObject.second->get_object_type()))
-					{
-						labelReferenceList = std::static_pointer_cast<ObjectLabelReferenceList>(currentObject.second);
-						break;
-					}
-				}
-
-				if (nullptr == labelReferenceList)
-				{
-					errorBitfield |= get_bit(static_cast<std::uint8_t>(ChangeObjectLabelErrorBit::NoObjectLabelReferenceListInPool));
-				}
-
-				// F.50 names an object to associate a label with, so the object has to exist and the list
-				// has to already carry an entry for it. A pool with no list at all is reported by bit 3
-				// alone: the object ID it names is not made invalid by the list being absent.
-				ObjectLabelReferenceList::ObjectLabel existingLabel{};
-
-				if ((nullptr == find_object(objectID)) ||
-				    ((nullptr != labelReferenceList) && (!labelReferenceList->get_label(objectID, existingLabel))))
-				{
-					errorBitfield |= get_bit(static_cast<std::uint8_t>(ChangeObjectLabelErrorBit::InvalidObjectID));
-				}
-
-				if (NULL_OBJECT_ID != stringVariableID)
-				{
-					auto stringVariableObject = find_object(stringVariableID);
-
-					if ((nullptr == stringVariableObject) ||
-					    (VirtualTerminalObjectType::StringVariable != stringVariableObject->get_object_type()))
-					{
-						errorBitfield |= get_bit(static_cast<std::uint8_t>(ChangeObjectLabelErrorBit::InvalidStringVariableObjectID));
-					}
-
-					// F.50 ignores the font type when the String Variable reference is NULL, so it is only
-					// checked when a string was supplied. The accepted values are the ones the object pool
-					// parser accepts for a Font Attributes object.
-					if ((fontType > static_cast<std::uint8_t>(FontAttributes::FontType::ISO8859_7)) ||
-					    (fontType == static_cast<std::uint8_t>(FontAttributes::FontType::Reserved_1)) ||
-					    (fontType == static_cast<std::uint8_t>(FontAttributes::FontType::Reserved_2)))
-					{
-						errorBitfield |= get_bit(static_cast<std::uint8_t>(ChangeObjectLabelErrorBit::InvalidFontType));
-					}
-				}
-
-				if ((NULL_OBJECT_ID != graphicObjectID) &&
-				    (nullptr == find_object(graphicObjectID)))
-				{
-					errorBitfield |= get_bit(static_cast<std::uint8_t>(ChangeObjectLabelErrorBit::DesignatorReferencesInvalidObjects));
-				}
-
-				if (0 == errorBitfield)
-				{
-					labelReferenceList->set_label(objectID, stringVariableID, fontType, graphicObjectID);
-					send_change_object_label_response(0, managedWorkingSet->get_control_function());
-					dispatch_repaint(managedWorkingSet);
-					LOG_DEBUG("[VT Server]: Client %u change object label command: Object: %u, String Variable: %u, Font: %u, Graphic: %u", managedWorkingSet->get_control_function()->get_address(), objectID, stringVariableID, fontType, graphicObjectID);
-				}
-				else
-				{
-					send_change_object_label_response(errorBitfield, managedWorkingSet->get_control_function());
-					LOG_WARNING("[VT Server]: Client %u change object label command for object %u was rejected with an error bitfield of %u", managedWorkingSet->get_control_function()->get_address(), objectID, errorBitfield);
-				}
-			}
-			break;
+				handle_change_object_label_command(data, managedWorkingSet);
+				break;
 
 			case Function::ControlAudioSignalCommand:
 			{
@@ -3041,43 +2441,6 @@ namespace isobus
 		return retVal;
 	}
 
-	bool VirtualTerminalServer::send_unsupported_vt_function(std::uint8_t unsupportedFunctionCode, std::shared_ptr<ControlFunction> destination) const
-	{
-		bool retVal = false;
-		if (nullptr != destination)
-		{
-			const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
-				static_cast<std::uint8_t>(Function::UnsupportedVTFunctionMessage),
-				unsupportedFunctionCode,
-				0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
-			};
-			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
-		}
-		return retVal;
-	}
-
-	bool VirtualTerminalServer::send_select_colour_map_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
-	{
-		bool retVal = false;
-
-		if (nullptr != destination)
-		{
-			const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
-				static_cast<std::uint8_t>(Function::SelectColourMapCommand),
-				get_low_byte(objectID),
-				get_high_byte(objectID),
-				errorBitfield,
-				0xFF,
-				0xFF,
-				0xFF,
-				0xFF
-			};
-
-			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
-		}
-		return retVal;
-	}
-
 	bool VirtualTerminalServer::send_change_attribute_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::uint8_t attributeID, std::shared_ptr<ControlFunction> destination) const
 	{
 		bool retVal = false;
@@ -3098,40 +2461,6 @@ namespace isobus
 			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
 		}
 		return retVal;
-	}
-
-	bool VirtualTerminalServer::send_get_attribute_value_response(std::uint16_t objectID, std::uint8_t attributeID, std::uint32_t value, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
-	{
-		std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = { 0 };
-
-		buffer[0] = static_cast<std::uint8_t>(Function::GetAttributeValueMessage);
-
-		if (0 != errorBitfield)
-		{
-			// F.59 error response: bytes 2-3 are 0xFFFF and the queried object ID moves to bytes 5-6
-			buffer[1] = 0xFF;
-			buffer[2] = 0xFF;
-			buffer[3] = attributeID;
-			buffer[4] = get_low_byte(objectID);
-			buffer[5] = get_high_byte(objectID);
-			buffer[6] = errorBitfield;
-			buffer[7] = 0xFF; // Reserved
-		}
-		else
-		{
-			// F.59 no-error response: the attribute value occupies bytes 5-8 little endian. Writing all
-			// four bytes suits every attribute data type, because a client reads only the number of bytes
-			// its attribute's type defines and the LSB is always first.
-			buffer[1] = get_low_byte(objectID);
-			buffer[2] = get_high_byte(objectID);
-			buffer[3] = attributeID;
-			buffer[4] = static_cast<std::uint8_t>(value & 0xFF);
-			buffer[5] = static_cast<std::uint8_t>((value >> 8) & 0xFF);
-			buffer[6] = static_cast<std::uint8_t>((value >> 16) & 0xFF);
-			buffer[7] = static_cast<std::uint8_t>((value >> 24) & 0xFF);
-		}
-
-		return send_response(buffer.data(), CAN_DATA_LENGTH, destination);
 	}
 
 	bool VirtualTerminalServer::send_change_background_colour_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::uint8_t colour, std::shared_ptr<ControlFunction> destination) const
@@ -3484,27 +2813,6 @@ namespace isobus
 		return retVal;
 	}
 
-	bool VirtualTerminalServer::send_extended_load_version_response(std::uint8_t errorCodes, std::shared_ptr<ControlFunction> destination) const
-	{
-		bool retVal = false;
-
-		if (nullptr != destination)
-		{
-			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
-				static_cast<std::uint8_t>(Function::ExtendedLoadVersionCommand),
-				0xFF, // Reserved
-				0xFF, // Reserved
-				0xFF, // Reserved
-				0xFF, // Reserved
-				errorCodes,
-				0xFF, // Reserved
-				0xFF // Reserved
-			};
-			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
-		}
-		return retVal;
-	}
-
 	void VirtualTerminalServer::process_macro(std::shared_ptr<isobus::VTObject> object, isobus::EventID macroEvent, isobus::VirtualTerminalObjectType targetObjectType, std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingset)
 	{
 		if (nullptr != object && targetObjectType == object->get_object_type())
@@ -3564,138 +2872,6 @@ namespace isobus
 			buffer[5] = 0xFF;
 			buffer[6] = 0xFF;
 			buffer[7] = 0xFF;
-
-			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
-		}
-		return retVal;
-	}
-
-	bool VirtualTerminalServer::send_change_end_point_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
-	{
-		bool retVal = false;
-
-		if (nullptr != destination)
-		{
-			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer;
-
-			buffer[0] = static_cast<std::uint8_t>(Function::ChangeEndPointCommand);
-			buffer[1] = get_low_byte(objectID);
-			buffer[2] = get_high_byte(objectID);
-			buffer[3] = errorBitfield;
-			buffer[4] = 0xFF;
-			buffer[5] = 0xFF;
-			buffer[6] = 0xFF;
-			buffer[7] = 0xFF;
-
-			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
-		}
-		return retVal;
-	}
-
-	bool VirtualTerminalServer::send_change_polygon_scale_response(std::uint16_t objectID, std::uint16_t newWidth, std::uint16_t newHeight, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
-	{
-		bool retVal = false;
-
-		if (nullptr != destination)
-		{
-			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer;
-
-			// F.55 echoes the commanded width and height rather than padding, so the error bitfield
-			// occupies the last byte instead of byte 4 and no byte of this response is reserved.
-			buffer[0] = static_cast<std::uint8_t>(Function::ChangePolygonScaleCommand);
-			buffer[1] = get_low_byte(objectID);
-			buffer[2] = get_high_byte(objectID);
-			buffer[3] = get_low_byte(newWidth);
-			buffer[4] = get_high_byte(newWidth);
-			buffer[5] = get_low_byte(newHeight);
-			buffer[6] = get_high_byte(newHeight);
-			buffer[7] = errorBitfield;
-
-			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
-		}
-		return retVal;
-	}
-
-	bool VirtualTerminalServer::send_esc_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
-	{
-		bool retVal = false;
-
-		if (nullptr != destination)
-		{
-			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer;
-
-			buffer[0] = static_cast<std::uint8_t>(Function::ESCCommand);
-			buffer[1] = get_low_byte(objectID);
-			buffer[2] = get_high_byte(objectID);
-			buffer[3] = errorBitfield;
-			buffer[4] = 0xFF;
-			buffer[5] = 0xFF;
-			buffer[6] = 0xFF;
-			buffer[7] = 0xFF;
-
-			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
-		}
-		return retVal;
-	}
-
-	bool VirtualTerminalServer::send_lock_unlock_mask_response(std::uint8_t command, std::uint8_t errorBitfield, bool unsolicited, std::shared_ptr<ControlFunction> destination) const
-	{
-		bool retVal = false;
-
-		if (nullptr != destination)
-		{
-			std::array<std::uint8_t, CAN_DATA_LENGTH> buffer;
-
-			buffer[0] = static_cast<std::uint8_t>(Function::LockUnlockMaskCommand);
-			buffer[1] = command;
-			buffer[2] = errorBitfield;
-			buffer[3] = 0xFF;
-			buffer[4] = 0xFF;
-			buffer[5] = 0xFF;
-			buffer[6] = 0xFF;
-			buffer[7] = 0xFF;
-
-			if (unsolicited)
-			{
-				// 4.6.11.4 f) withholds the VT's response to a command a macro contains. A release the VT
-				// originates is not a response to any command, and F.46 requires it to reach the working
-				// set, so it bypasses that suppression the same way the VT Status and the activation
-				// messages do. Routing it through send_response would drop the notification whenever a
-				// lock happened to be released from inside a macro, leaving the client believing it still
-				// held a lock the server had already given up.
-				retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
-				                                                        buffer.data(),
-				                                                        CAN_DATA_LENGTH,
-				                                                        serverInternalControlFunction,
-				                                                        destination,
-				                                                        get_priority());
-			}
-			else
-			{
-				retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
-			}
-		}
-		return retVal;
-	}
-
-	bool VirtualTerminalServer::send_change_object_label_response(std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
-	{
-		bool retVal = false;
-
-		if (nullptr != destination)
-		{
-			// F.51 puts the error bitfield in byte 2 and reserves bytes 3-8. There is no object ID echo,
-			// which every other change command response in the set has.
-			const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer{
-				static_cast<std::uint8_t>(Function::ChangeObjectLabelCommand),
-				errorBitfield,
-				0xFF,
-				0xFF,
-				0xFF,
-				0xFF,
-				0xFF,
-				0xFF
-			};
 
 			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
 		}

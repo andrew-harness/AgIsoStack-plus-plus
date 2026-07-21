@@ -928,6 +928,76 @@ namespace isobus
 		/// @param[in] managedWorkingSet The working set that sent the status
 		void handle_auxiliary_input_type_2_status_message(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
 
+		/// @brief Handles a Get Supported Objects message (0xC5, D.14/D.15) from the stateless message path,
+		/// replying with the object types the server supports
+		/// @param[in] message The CAN message that was received
+		/// @returns true if a response was sent, otherwise false
+		bool handle_get_supported_objects_message(const CANMessage &message);
+
+		/// @brief Handles an Extended Get Versions message (0xD3, Annex E), replying with the extended version
+		/// labels stored for the client
+		/// @param[in] message The CAN message that was received
+		void handle_extended_get_versions_message(const CANMessage &message);
+
+		/// @brief Handles an Extended Store Version command (0xD4, E.13), saving the client's object pool under
+		/// a 32 byte version label
+		/// @param[in] message The CAN message that was received
+		/// @param[in] data The message data buffer
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_extended_store_version_command(const CANMessage &message, const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Handles an Extended Delete Version command (0xD6, Annex E), deleting the stored object pool
+		/// named by a 32 byte version label
+		/// @param[in] message The CAN message that was received
+		/// @param[in] data The message data buffer
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_extended_delete_version_command(const CANMessage &message, const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Handles an Extended Load Version command (0xD5, E.14/E.15), loading a stored object pool named
+		/// by a 32 byte version label
+		/// @param[in] message The CAN message that was received
+		/// @param[in] data The message data buffer
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_extended_load_version_command(const CANMessage &message, const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Handles a Select Colour Map command (0xBA), selecting the working set's active Colour Map object
+		/// @param[in] data The message data buffer
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_select_colour_map_command(const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Handles a Get Attribute Value message (0xB9, F.59), replying with the requested object
+		/// attribute's value
+		/// @param[in] data The message data buffer
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_get_attribute_value_message(const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Handles a Change End Point command (0xA9), resizing an Output Line and setting its direction
+		/// @param[in] data The message data buffer
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_change_end_point_command(const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Handles a Change Polygon Scale command (0xB7, F.54), rescaling an Output Polygon's points and
+		/// dimensions
+		/// @param[in] data The message data buffer
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_change_polygon_scale_command(const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Handles an ESC command (0x92, F.9), aborting input on the object currently open for input
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_esc_command(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Handles a Lock/Unlock Mask command (0xBD, F.46), locking or unlocking the active working set's
+		/// visible mask
+		/// @param[in] data The message data buffer
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_lock_unlock_mask_command(const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Handles a Change Object Label command (0xB5, F.50/F.51), updating an entry in the pool's
+		/// Object Label Reference List
+		/// @param[in] data The message data buffer
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_change_object_label_command(const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
 		/// @brief Sends a response to a change background colour command
 		/// @param[in] objectID The object ID for the object to change
 		/// @param[in] errorBitfield An error bitfield
