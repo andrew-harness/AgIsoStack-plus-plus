@@ -3135,8 +3135,7 @@ namespace isobus
 				// function reports the null address while no working set is active.
 				const bool poolWasActive = (ws == activeWorkingSet);
 
-				///  @todo Get the parent object ID of the faulting object
-				send_end_of_object_pool_response(false, NULL_OBJECT_ID, ws->get_object_pool_faulting_object_id(), static_cast<std::uint8_t>(get_bit(2) | (poolWasActive ? get_bit(3) : 0)), ws->get_control_function());
+				send_end_of_object_pool_response(false, ws->get_object_pool_faulting_parent_object_id(), ws->get_object_pool_faulting_object_id(), static_cast<std::uint8_t>(get_bit(2) | (poolWasActive ? get_bit(3) : 0)), ws->get_control_function());
 
 				if (poolWasActive)
 				{

@@ -108,6 +108,15 @@ namespace isobus
 		/// @returns The object ID of the faulting object if parsing the object pool failed
 		std::uint16_t get_object_pool_faulting_object_id();
 
+		/// @brief Returns the object ID of the faulting object's parent if parsing the object pool failed
+		/// @details ISO 11783-6 C.2.5 bytes 3-4, "Parent Object ID of faulty object". Resolved in
+		/// lockstep with the faulting object ID when a parse failure is recorded, so the two always
+		/// describe the same fault. NULL_OBJECT_ID when the faulting object has no parent in the pool
+		/// (a top-level object, such as the Working Set object itself), when its parent had not parsed
+		/// yet, or when no parse failure has been recorded.
+		/// @returns The parent object ID of the faulting object, or NULL_OBJECT_ID if none is known
+		std::uint16_t get_object_pool_faulting_parent_object_id();
+
 		/// @brief Checks the transferred object pool size against the memory the client declared in its Get Memory message
 		/// @details Returns true unless the pool transferred more bytes than the declared size. A declared
 		/// size of 0 means no Get Memory has set a budget, so the bound does not apply and this returns true.
@@ -179,6 +188,35 @@ namespace isobus
 		/// @param[in] value The object ID to set as the faulting object
 		void set_object_pool_faulting_object_id(std::uint16_t value);
 
+		/// @brief Sets the parent object ID recorded alongside the faulting object during pool parsing
+		/// @param[in] value The parent object ID to record, or NULL_OBJECT_ID if none was resolved
+		void set_object_pool_faulting_parent_object_id(std::uint16_t value);
+
+		/// @brief Resolves the parent of a faulting object by scanning the staging tree's child lists
+		/// @details ISO 11783-6 C.2.5 does not say how the VT determines the parent, so this is a
+		/// best-effort resolution: it scans the objects already parsed into the staging tree for the
+		/// first one whose child list references childObjectID, using the generic VTObject child API
+		/// (get_number_children() / get_child_id()). Because the staging tree is a std::map iterated in
+		/// ascending object-ID order, "first" is the lowest parent ID, which makes the answer
+		/// deterministic when an object is referenced as a child by more than one parent.
+		///
+		/// Only child lists count as parenthood. Macro references and attribute/variable references are
+		/// deliberately not treated as parent relationships -- C.2.5's "parent" is the object-tree
+		/// containment the pool is built from, and a Number Variable referenced by an Output Number is
+		/// not that Output Number's parent.
+		///
+		/// Returns NULL_OBJECT_ID when no parsed object references childObjectID -- the faulting object
+		/// is top-level (the Working Set object has no parent), or its parent has not parsed yet (a pool
+		/// may declare a child before its parent). NULL is C.2.5's own fallback and is unavoidable for a
+		/// top-level fault, so it is the honest floor rather than a guess.
+		///
+		/// Called only from parse_next_object, on the parse worker thread, which owns the staging tree
+		/// exclusively for the duration of a parse; it reads that tree directly and takes no lock and
+		/// allocates nothing.
+		/// @param[in] childObjectID The faulting object ID whose parent is sought
+		/// @returns The lowest object ID whose child list contains childObjectID, else NULL_OBJECT_ID
+		std::uint16_t resolve_faulting_parent_object_id(std::uint16_t childObjectID) const;
+
 		/// @brief Parses macro references from IOP data and updates the given object.
 		/// Advances iopData and decrements iopLength accordingly.
 		/// Note: On failure, iopData and iopLength may have been partially advanced.
@@ -222,6 +260,7 @@ namespace isobus
 		std::size_t parsedIopFileCount = 0; ///< Count of iopFilesRawData chunks already parsed into the tree. A runtime object pool update (C.2.6) parses only the newer chunks so live objects -- and any runtime state on them -- are merged with, not rebuilt from, the authored bytes.
 		std::uint16_t workingSetID = NULL_OBJECT_ID; ///< Stores the object ID of the working set object itself
 		std::uint16_t faultingObjectID = NULL_OBJECT_ID; ///< Stores the faulting object ID to send to a client when parsing the pool fails
+		std::uint16_t faultingParentObjectID = NULL_OBJECT_ID; ///< Parent of faultingObjectID (ISO 11783-6 C.2.5 bytes 3-4). Moves in lockstep with faultingObjectID: set together at the parse funnel, reset together in reset_object_pool_storage(). NULL_OBJECT_ID when the faulting object has no parsed parent.
 		bool objectPoolTransferDataDropped = false; ///< Set when Object Pool Transfer data for this working set was discarded, so the pool is missing objects the client believes it sent. Sticky until reset_object_pool_storage().
 	};
 } // namespace isobus

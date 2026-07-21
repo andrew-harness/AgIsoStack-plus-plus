@@ -165,7 +165,7 @@ namespace isobus
 
 		{
 			// iopSize and transferredIopSize are written under this mutex because set_iop_size() writes
-			// them under it, and faultingObjectID because set_object_pool_faulting_object_id() does.
+			// them under it, and faultingObjectID / faultingParentObjectID because their setters do.
 			const std::lock_guard<std::mutex> lock(managedWorkingSetMutex);
 
 			// A transfer declares its own budget in its Get Memory message (Annex D.3). Zero is the "no
@@ -173,7 +173,10 @@ namespace isobus
 			// so the deleted pool's budget cannot bound the next one.
 			iopSize = 0;
 			transferredIopSize = 0;
+			// faultingParentObjectID resets alongside faultingObjectID: they name one fault together, so
+			// a stale parent from a previous failed parse must never outlive the object it belonged to.
 			faultingObjectID = NULL_OBJECT_ID;
+			faultingParentObjectID = NULL_OBJECT_ID;
 		}
 	}
 
@@ -2546,6 +2549,7 @@ namespace isobus
 			if (!retVal)
 			{
 				set_object_pool_faulting_object_id(decodedID);
+				set_object_pool_faulting_parent_object_id(resolve_faulting_parent_object_id(decodedID));
 			}
 		}
 		return retVal;

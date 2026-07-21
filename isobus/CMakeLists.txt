@@ -57,7 +57,8 @@ if(NOT CAN_STACK_DISABLE_THREADS)
        "isobus_virtual_terminal_server_handlers_isovt.cpp"
        "isobus_virtual_terminal_server_policy_isovt.cpp"
        "isobus_virtual_terminal_working_set_base.cpp"
-       "isobus_virtual_terminal_server_managed_working_set.cpp")
+       "isobus_virtual_terminal_server_managed_working_set.cpp"
+       "isobus_virtual_terminal_working_set_base_isovt.cpp")
 endif()
 
 # Prepend the source directory path to all the source files
