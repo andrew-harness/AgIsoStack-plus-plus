@@ -1264,6 +1264,19 @@ namespace isobus
 		/// @param[in] workingSet The working set whose presentation would be refreshed
 		void dispatch_repaint(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet);
 
+		/// @brief Releases the mask lock of each managed working set whose lock timeout has expired,
+		/// announcing the release with an unsolicited Lock/Unlock Mask Response (ISO 11783-6 F.46), so a
+		/// client that stops talking cannot freeze the operator's screen indefinitely. Run from update().
+		void release_expired_mask_locks();
+
+		/// @brief Tears down each managed working set that has been lost, either because no Working Set
+		/// Maintenance message has arrived for over 3 s (ISO 11783-6 clause 4.6.9) or because a runtime
+		/// object pool update failed to parse (clause C.2.6), deleting its object pool and dropping it as
+		/// the active working set. A teardown that lands while a parse is still outstanding is deferred to
+		/// a later update(). Run from update().
+		/// @returns true if at least one working set was torn down, so the caller re-runs the arbitration
+		bool tear_down_lost_working_sets();
+
 		/// @brief Sends the list of objects that the server supports to a client, usually in
 		/// response to a "get supported objects" message, which is used by a client.
 		/// @param[in] destination The control function to send the message to

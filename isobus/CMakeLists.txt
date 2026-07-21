@@ -54,6 +54,7 @@ if(NOT CAN_STACK_DISABLE_THREADS)
   list(APPEND ISOBUS_SRC "isobus_virtual_terminal_server.cpp"
        "isobus_virtual_terminal_server_auxiliary_isovt.cpp"
        "isobus_virtual_terminal_server_handlers_isovt.cpp"
+       "isobus_virtual_terminal_server_policy_isovt.cpp"
        "isobus_virtual_terminal_working_set_base.cpp"
        "isobus_virtual_terminal_server_managed_working_set.cpp")
 endif()
