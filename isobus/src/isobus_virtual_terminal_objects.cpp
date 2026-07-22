@@ -315,7 +315,7 @@ namespace isobus
 		        (NULL_OBJECT_ID != objectID));
 	}
 
-	bool WorkingSet::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &returnedError)
+	bool WorkingSet::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &objectPool, AttributeError &returnedError)
 	{
 		bool retVal = false;
 
@@ -339,8 +339,26 @@ namespace isobus
 
 				case AttributeName::ActiveMask:
 				{
-					set_active_mask(static_cast<std::uint16_t>(rawAttributeData));
-					retVal = true;
+					// F.34 restricts a Working Set's active mask to a Data Mask or Alarm Mask present in the
+					// pool, and the Change Active Mask command rejects any other target while leaving state
+					// untouched. This attribute path makes the same mask change, so it resolves the target
+					// through the same get_object_by_id the command path uses -- whose explicit
+					// NULL_OBJECT_ID guard rejects 0xFFFF even against a malformed pool that stored an
+					// object under the reserved ID -- and refuses an absent target or one of any other type
+					// with InvalidValue (F.39 byte 5 bit 2), writing nothing.
+					const auto newActiveMaskObjectId = static_cast<std::uint16_t>(rawAttributeData);
+					const auto newActiveMaskObject = get_object_by_id(newActiveMaskObjectId, objectPool);
+					if ((nullptr != newActiveMaskObject) &&
+					    ((VirtualTerminalObjectType::DataMask == newActiveMaskObject->get_object_type()) ||
+					     (VirtualTerminalObjectType::AlarmMask == newActiveMaskObject->get_object_type())))
+					{
+						set_active_mask(newActiveMaskObjectId);
+						retVal = true;
+					}
+					else
+					{
+						returnedError = AttributeError::InvalidValue;
+					}
 				}
 				break;
 

@@ -54,7 +54,19 @@ TEST(VIRTUAL_TERMINAL_OBJECT_TESTS, WorkingSetTests)
 	EXPECT_TRUE(ws->get_selectable());
 
 	VTObject::AttributeError error = VTObject::AttributeError::AnyOtherError;
+
+	// The active mask attribute takes only a Data Mask or Alarm Mask present in the pool (F.34, matching
+	// the Change Active Mask command). A valid target is stored; an absent or wrong-type one is refused
+	// with InvalidValue and leaves the mask unchanged.
+	auto activeMaskCandidate = std::make_shared<DataMask>();
+	activeMaskCandidate->set_id(4321);
+	objects[activeMaskCandidate->get_id()] = activeMaskCandidate;
 	EXPECT_TRUE(ws->set_attribute(static_cast<std::uint8_t>(WorkingSet::AttributeName::ActiveMask), 4321, objects, error));
+	EXPECT_EQ(ws->get_active_mask(), 4321);
+
+	error = VTObject::AttributeError::AnyOtherError;
+	EXPECT_FALSE(ws->set_attribute(static_cast<std::uint8_t>(WorkingSet::AttributeName::ActiveMask), 9999, objects, error));
+	EXPECT_EQ(error, VTObject::AttributeError::InvalidValue);
 	EXPECT_EQ(ws->get_active_mask(), 4321);
 
 	EXPECT_TRUE(ws->set_attribute(static_cast<std::uint8_t>(WorkingSet::AttributeName::Selectable), 1, objects, error));
@@ -110,9 +122,9 @@ TEST(VIRTUAL_TERMINAL_OBJECT_TESTS, WorkingSetTests)
 
 	// Test setting and getting all attributes
 	std::uint32_t testValue = 0;
-	EXPECT_TRUE(ws->set_attribute(static_cast<std::uint8_t>(WorkingSet::AttributeName::ActiveMask), 1234, objects, error));
+	EXPECT_TRUE(ws->set_attribute(static_cast<std::uint8_t>(WorkingSet::AttributeName::ActiveMask), 4321, objects, error));
 	EXPECT_TRUE(ws->get_attribute(static_cast<std::uint8_t>(WorkingSet::AttributeName::ActiveMask), testValue));
-	EXPECT_EQ(testValue, 1234);
+	EXPECT_EQ(testValue, 4321);
 
 	EXPECT_TRUE(ws->set_attribute(static_cast<std::uint8_t>(WorkingSet::AttributeName::Selectable), 1, objects, error));
 	EXPECT_TRUE(ws->get_attribute(static_cast<std::uint8_t>(WorkingSet::AttributeName::Selectable), testValue));
