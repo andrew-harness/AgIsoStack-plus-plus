@@ -844,7 +844,10 @@ namespace isobus
 		    (nullptr != listOfYOffsetsRelativeToCursor))
 
 		{
-			const std::uint16_t messageLength = (9 + (4 * numberOfPoints));
+			// F.56 sub-command 12: byte 1 the function, bytes 2-3 the object ID, byte 4 the sub-command,
+			// byte 5 the point count, then each point as X offset (signed 16 LE) followed by Y offset
+			// (signed 16 LE) -- 4 bytes per point. The message is 5 + 4 * point count bytes long.
+			const std::uint16_t messageLength = static_cast<std::uint16_t>(5 + (4 * numberOfPoints));
 			std::vector<std::uint8_t> buffer;
 			buffer.resize(messageLength);
 			buffer[0] = static_cast<std::uint8_t>(Function::GraphicsContextCommand);
@@ -852,12 +855,13 @@ namespace isobus
 			buffer[2] = static_cast<std::uint8_t>(objectID >> 8);
 			buffer[3] = static_cast<std::uint8_t>(GraphicsContextSubCommandID::DrawPolygon);
 			buffer[4] = numberOfPoints;
-			for (std::uint16_t i = 0; i < numberOfPoints; i += 4)
+			for (std::uint8_t i = 0; i < numberOfPoints; i++)
 			{
-				buffer[5 + i] = static_cast<std::uint8_t>(listOfXOffsetsRelativeToCursor[0] & 0xFF);
-				buffer[6 + i] = static_cast<std::uint8_t>((listOfXOffsetsRelativeToCursor[0] >> 8) & 0xFF);
-				buffer[7 + i] = static_cast<std::uint8_t>(listOfYOffsetsRelativeToCursor[0] & 0xFF);
-				buffer[8 + i] = static_cast<std::uint8_t>((listOfYOffsetsRelativeToCursor[0] >> 8) & 0xFF);
+				const std::size_t offset = static_cast<std::size_t>(5) + (static_cast<std::size_t>(4) * i);
+				buffer[offset] = static_cast<std::uint8_t>(listOfXOffsetsRelativeToCursor[i] & 0xFF);
+				buffer[offset + 1] = static_cast<std::uint8_t>((listOfXOffsetsRelativeToCursor[i] >> 8) & 0xFF);
+				buffer[offset + 2] = static_cast<std::uint8_t>(listOfYOffsetsRelativeToCursor[i] & 0xFF);
+				buffer[offset + 3] = static_cast<std::uint8_t>((listOfYOffsetsRelativeToCursor[i] >> 8) & 0xFF);
 			}
 			retVal = queue_command(buffer, true);
 		}
