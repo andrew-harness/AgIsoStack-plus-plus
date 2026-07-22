@@ -1925,6 +1925,15 @@ namespace isobus
 						case VirtualTerminalObjectType::WindowMask:
 						{
 							targetObject->set_background_color(backgroundColour);
+
+							if (VirtualTerminalObjectType::GraphicsContext == targetObject->get_object_type())
+							{
+								// Table B.58 On Change Background Colour / Table B.59 byte-25 note: writing a
+								// Graphics Context's background colour at runtime fills the object with it,
+								// erasing any canvas content -- by this command exactly as by Change Attribute.
+								std::static_pointer_cast<GraphicsContext>(targetObject)->fill_canvas(backgroundColour);
+							}
+
 							LOG_DEBUG("[VT Server]: Client %u change background colour command: colour = %u", managedWorkingSet->get_control_function()->get_address(), objectID, backgroundColour);
 							send_change_background_colour_response(objectID, 0, backgroundColour, message.get_source_control_function());
 							process_macro(targetObject, EventID::OnChangeBackgroundColour, targetObject->get_object_type(), managedWorkingSet);
@@ -2319,6 +2328,10 @@ namespace isobus
 
 			case Function::SetAudioVolumeCommand:
 				handle_set_audio_volume_command(data, message.get_source_control_function());
+				break;
+
+			case Function::GraphicsContextCommand:
+				handle_graphics_context_command(data, managedWorkingSet);
 				break;
 
 			case Function::IdentifyVTMessage:

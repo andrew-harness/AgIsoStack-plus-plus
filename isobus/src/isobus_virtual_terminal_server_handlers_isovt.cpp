@@ -1032,6 +1032,140 @@ namespace isobus
 		return send_response(buffer.data(), CAN_DATA_LENGTH, destination);
 	}
 
+	void VirtualTerminalServer::set_graphics_context_command_callback(GraphicsContextCommandCallback callback)
+	{
+		graphicsContextCommandCallback = std::move(callback);
+	}
+
+	void VirtualTerminalServer::handle_graphics_context_command(const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet)
+	{
+		// F.56: byte 1 the function (0xB8), bytes 2-3 the Graphics Context object ID, byte 4 the sub-command
+		// ID, bytes 5-n the parameters. Decoded little-endian like the surrounding commands.
+		const std::uint16_t objectID = get_little_endian_uint16(data, 1);
+		const std::uint8_t subCommand = data[3];
+		auto object = managedWorkingSet->get_object_by_id(objectID);
+
+		// F.57 byte 5 bit 0: invalid object ID, or the object is not a Graphics Context object.
+		if ((nullptr == object) || (VirtualTerminalObjectType::GraphicsContext != object->get_object_type()))
+		{
+			send_graphics_context_response(objectID, subCommand, get_bit(0), managedWorkingSet->get_control_function());
+			LOG_WARNING("[VT Server]: Client %u graphics context command: object id %u is not a graphics context in this pool", managedWorkingSet->get_control_function()->get_address(), objectID);
+			return;
+		}
+
+		// F.57 byte 5 bit 1: invalid sub-command ID. Table F.1 defines sub-commands 0-20; the function
+		// itself is supported, so an out-of-range sub-command is a bit-1 error, not an Unsupported VT
+		// Function (0xFD).
+		if (subCommand > static_cast<std::uint8_t>(GraphicsContextSubCommandID::CopyViewportToPictureGraphic))
+		{
+			send_graphics_context_response(objectID, subCommand, get_bit(1), managedWorkingSet->get_control_function());
+			LOG_WARNING("[VT Server]: Client %u graphics context command on object %u has an invalid sub-command id of %u", managedWorkingSet->get_control_function()->get_address(), objectID, subCommand);
+			return;
+		}
+
+		// F.56: a sub-command smaller than 8 bytes is padded to 8, so every fixed-length sub-command's
+		// parameters arrive in one frame. Bound the fixed parameters here so the painter cannot read past
+		// the received data. Sub-commands 8-20 are not executed in this slice; the painter returns
+		// NotExecuted and reads no parameters, so they need no bound here.
+		std::size_t requiredParameterBytes = 0;
+		switch (static_cast<GraphicsContextSubCommandID>(subCommand))
+		{
+			case GraphicsContextSubCommandID::SetGraphicsCursor: // F.56 bytes 5-8: X, Y (signed)
+			case GraphicsContextSubCommandID::MoveGraphicsCursor: // F.56 bytes 5-8: X offset, Y offset (signed)
+			case GraphicsContextSubCommandID::EraseRectangle: // F.56 bytes 5-8: width, height
+				requiredParameterBytes = 4;
+				break;
+
+			case GraphicsContextSubCommandID::SetForegroundColour: // F.56 byte 5: colour
+			case GraphicsContextSubCommandID::SetBackgroundColour: // F.56 byte 5: colour
+				requiredParameterBytes = 1;
+				break;
+
+			case GraphicsContextSubCommandID::SetLineAttributesObjectID: // F.56 bytes 5-6: object ID
+			case GraphicsContextSubCommandID::SetFillAttributesObjectID: // F.56 bytes 5-6: object ID
+			case GraphicsContextSubCommandID::SetFontAttributesObjectID: // F.56 bytes 5-6: object ID
+				requiredParameterBytes = 2;
+				break;
+
+			default:
+				requiredParameterBytes = 0;
+				break;
+		}
+
+		if (data.size() < (4u + requiredParameterBytes))
+		{
+			// F.57 byte 5 bit 2: the parameter is invalid because the frame is too short to carry it.
+			send_graphics_context_response(objectID, subCommand, get_bit(2), managedWorkingSet->get_control_function());
+			LOG_WARNING("[VT Server]: Client %u graphics context command on object %u sub-command %u is too short for its parameters", managedWorkingSet->get_control_function()->get_address(), objectID, subCommand);
+			return;
+		}
+
+		GraphicsContextCommandResult verdict = GraphicsContextCommandResult::NotExecuted;
+		if (graphicsContextCommandCallback)
+		{
+			verdict = graphicsContextCommandCallback(managedWorkingSet, objectID, subCommand, data.data() + 4, data.size() - 4);
+		}
+
+		// F.57 byte 5: map the painter verdict onto the error bits. Object-ID (bit 0) and sub-command-ID
+		// (bit 1) errors are handled above, so the painter reports only bits 2, 3 and 4. With no painter
+		// installed the verdict stays NotExecuted, which is the any-other-error bit (the VT executes no
+		// drawing).
+		std::uint8_t errorBitfield = 0;
+		switch (verdict)
+		{
+			case GraphicsContextCommandResult::Executed:
+				errorBitfield = 0;
+				break;
+
+			case GraphicsContextCommandResult::InvalidParameter:
+				errorBitfield = get_bit(2);
+				break;
+
+			case GraphicsContextCommandResult::InvalidResult:
+				errorBitfield = get_bit(3);
+				break;
+
+			case GraphicsContextCommandResult::NotExecuted:
+			default:
+				errorBitfield = get_bit(4);
+				break;
+		}
+
+		send_graphics_context_response(objectID, subCommand, errorBitfield, managedWorkingSet->get_control_function());
+
+		if (GraphicsContextCommandResult::Executed == verdict)
+		{
+			// A sub-command that executed may have changed the canvas or an attribute the screen shows;
+			// refresh the display the same way every other change command does.
+			dispatch_repaint(managedWorkingSet);
+		}
+		LOG_DEBUG("[VT Server]: Client %u graphics context command on object %u sub-command %u -> error %u", managedWorkingSet->get_control_function()->get_address(), objectID, subCommand, errorBitfield);
+	}
+
+	bool VirtualTerminalServer::send_graphics_context_response(std::uint16_t objectID, std::uint8_t subCommand, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			// F.57: byte 1 command echo 0xB8, bytes 2-3 object ID, byte 4 sub-command ID, byte 5 error
+			// bitfield, bytes 6-8 reserved 0xFF.
+			const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+				static_cast<std::uint8_t>(Function::GraphicsContextCommand),
+				get_low_byte(objectID),
+				get_high_byte(objectID),
+				subCommand,
+				errorBitfield,
+				0xFF,
+				0xFF,
+				0xFF
+			};
+
+			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
+		}
+		return retVal;
+	}
+
 	bool VirtualTerminalServer::send_control_audio_signal_termination(std::shared_ptr<ControlFunction> destination) const
 	{
 		bool retVal = false;

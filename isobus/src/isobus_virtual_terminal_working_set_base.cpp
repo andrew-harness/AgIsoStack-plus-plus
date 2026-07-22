@@ -1500,7 +1500,71 @@ namespace isobus
 
 				case VirtualTerminalObjectType::GraphicsContext:
 				{
-					retVal = parse_unsupported_object(decodedType, decodedID, iopData, iopLength);
+					auto tempObject = std::make_shared<GraphicsContext>();
+
+					if (iopLength >= tempObject->get_minumum_object_length())
+					{
+						// Table B.59: fixed 34-byte record, no children and no macro list. Record byte N maps
+						// to iopData[N-1].
+						const std::uint8_t canvasFormat = iopData[31]; // Format, byte 32
+						const std::uint16_t canvasWidth = get_little_endian_uint16(iopData, 11); // Canvas Width, bytes 12-13
+						const std::uint16_t canvasHeight = get_little_endian_uint16(iopData, 13); // Canvas Height, bytes 14-15
+						const std::size_t canvasArea = static_cast<std::size_t>(canvasWidth) * static_cast<std::size_t>(canvasHeight);
+
+						if (canvasFormat > static_cast<std::uint8_t>(GraphicsContext::Format::EightBitColour))
+						{
+							LOG_ERROR("[WS]: Graphics context object " + isobus::to_string(static_cast<int>(decodedID)) + " has an invalid canvas format");
+						}
+						else if (canvasArea > GraphicsContext::MAX_CANVAS_AREA)
+						{
+							// A 34-byte record carries no pixel data, so an oversize canvas is a memory
+							// amplification the VT must refuse (B.18 warns pools to keep the canvas small).
+							LOG_ERROR("[WS]: Graphics context object " + isobus::to_string(static_cast<int>(decodedID)) + " declares a canvas larger than the VT will allocate");
+						}
+						else
+						{
+							tempObject->set_id(decodedID);
+							tempObject->set_width(get_little_endian_uint16(iopData, 3)); // Viewport Width (AID 1), bytes 4-5
+							tempObject->set_height(get_little_endian_uint16(iopData, 5)); // Viewport Height (AID 2), bytes 6-7
+							tempObject->set_viewport_x(get_little_endian_int16(iopData, 7)); // Viewport X (AID 3), bytes 8-9, signed
+							tempObject->set_viewport_y(get_little_endian_int16(iopData, 9)); // Viewport Y (AID 4), bytes 10-11, signed
+
+							// Viewport Zoom (AID 7), IEEE 754 float in bytes 16-19.
+							float zoom = 1.0f;
+							std::uint8_t zoomBuffer[4] = { iopData[15], iopData[16], iopData[17], iopData[18] };
+							std::memcpy(&zoom, &zoomBuffer, 4);
+							tempObject->set_viewport_zoom(zoom);
+
+							tempObject->set_cursor_x(get_little_endian_int16(iopData, 19)); // Graphics Cursor X (AID 8), bytes 20-21, signed
+							tempObject->set_cursor_y(get_little_endian_int16(iopData, 21)); // Graphics Cursor Y (AID 9), bytes 22-23, signed
+							tempObject->set_foreground_colour(iopData[23]); // Foreground Colour (AID 10), byte 24
+							const std::uint8_t backgroundColour = iopData[24]; // Background Colour (AID 11), byte 25
+							tempObject->set_background_color(backgroundColour);
+							tempObject->set_font_attributes_object_id(get_little_endian_uint16(iopData, 25)); // AID 12, bytes 26-27
+							tempObject->set_line_attributes_object_id(get_little_endian_uint16(iopData, 27)); // AID 13, bytes 28-29
+							tempObject->set_fill_attributes_object_id(get_little_endian_uint16(iopData, 29)); // AID 14, bytes 30-31
+							tempObject->set_format(static_cast<GraphicsContext::Format>(canvasFormat)); // Format (AID 15), byte 32
+							tempObject->set_options(iopData[32]); // Options (AID 16), byte 33; reserved bits 2-7 masked off
+							tempObject->set_transparency_colour(iopData[33]); // Transparency Colour (AID 17), byte 34
+
+							// B.18 / Table B.59 byte 25 note: the canvas is filled with the background colour at
+							// parse. Allocation happens here on the parse thread, never on the draw path.
+							tempObject->allocate_canvas(canvasWidth, canvasHeight, backgroundColour);
+
+							iopLength -= 34;
+							iopData += 34;
+							retVal = true;
+						}
+					}
+					else
+					{
+						LOG_ERROR("[WS]: Not enough IOP data to parse graphics context object");
+					}
+
+					if (retVal)
+					{
+						retVal = add_or_replace_object(tempObject);
+					}
 				}
 				break;
 
@@ -2201,7 +2265,25 @@ namespace isobus
 										commandLength = 9;
 										break;
 									case Macro::Command::GraphicsContextCommand:
-										// FIXME
+										// F.56: a Graphics Context command carried by one CAN frame is padded to 8
+										// bytes, so it is stored and replayed like any other 8-byte macro command.
+										// execute_macro replays each stored packet as an rx message, so execution
+										// runs through the 0xB8 case of process_connection_dependent_messages. This
+										// covers sub-commands 0-7, whose parameters all fit one frame; sub-commands
+										// whose parameters exceed 8 bytes (12 Draw Polygon, 13 Draw Text, 16 Pan
+										// and Zoom) are carried by Transport Protocol and need sub-command-aware
+										// length handling, deferred with their drawing slices.
+										retVal = tempObject->add_command_packet({
+										  iopData[0],
+										  iopData[1],
+										  iopData[2],
+										  iopData[3],
+										  iopData[4],
+										  iopData[5],
+										  iopData[6],
+										  iopData[7],
+										});
+										commandLength = 8;
 										break;
 									case Macro::Command::ChangeStringValue:
 									{
@@ -2764,13 +2846,6 @@ namespace isobus
 
 		switch (type)
 		{
-			case VirtualTerminalObjectType::GraphicsContext:
-			{
-				// Table B.59: fixed 34-byte record, no children and no macro list.
-				objectLength = 34;
-			}
-			break;
-
 			case VirtualTerminalObjectType::ExternalReferenceNAME:
 			{
 				// Table B.68: object id, type, options, and two 4-byte NAME halves.

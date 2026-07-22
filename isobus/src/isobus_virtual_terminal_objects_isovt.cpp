@@ -12,6 +12,7 @@
 #include "isobus/isobus/isobus_virtual_terminal_objects_isovt.hpp"
 
 #include <algorithm>
+#include <cstring>
 
 namespace isobus
 {
@@ -383,6 +384,544 @@ namespace isobus
 			}
 		}
 		return retVal;
+	}
+
+	VirtualTerminalObjectType GraphicsContext::get_object_type() const
+	{
+		return VirtualTerminalObjectType::GraphicsContext;
+	}
+
+	std::uint32_t GraphicsContext::get_minumum_object_length() const
+	{
+		return MIN_OBJECT_LENGTH;
+	}
+
+	bool GraphicsContext::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const
+	{
+		// Table B.59 declares no children and no macro list, and the parse already rejects an invalid
+		// canvas format and an oversize canvas. A dangling Font/Line/Fill Attributes reference is not a
+		// reason to reject the pool -- those objects are only consulted by the drawing sub-commands, which
+		// validate the reference themselves at execution time -- so validity here is just a present ID.
+		return (NULL_OBJECT_ID != objectID);
+	}
+
+	bool GraphicsContext::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &returnedError)
+	{
+		bool retVal = false;
+
+		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
+		{
+			switch (static_cast<AttributeName>(attributeID))
+			{
+				case AttributeName::ViewportWidth:
+				{
+					// Viewport width/height are the object's display size, so they are the base width/height.
+					set_width(static_cast<std::uint16_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ViewportHeight:
+				{
+					set_height(static_cast<std::uint16_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ViewportX:
+				{
+					set_viewport_x(static_cast<std::int16_t>(static_cast<std::uint16_t>(rawAttributeData)));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ViewportY:
+				{
+					set_viewport_y(static_cast<std::int16_t>(static_cast<std::uint16_t>(rawAttributeData)));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ViewportZoom:
+				{
+					// Table B.59 AID 7 is an IEEE 754 float carried as raw bits through the generic uint32.
+					float zoom = 1.0f;
+					std::memcpy(&zoom, &rawAttributeData, sizeof(float));
+					set_viewport_zoom(zoom);
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::GraphicsCursorX:
+				{
+					set_cursor_x(static_cast<std::int16_t>(static_cast<std::uint16_t>(rawAttributeData)));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::GraphicsCursorY:
+				{
+					set_cursor_y(static_cast<std::int16_t>(static_cast<std::uint16_t>(rawAttributeData)));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ForegroundColour:
+				{
+					set_foreground_colour(static_cast<std::uint8_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::BackgroundColour:
+				{
+					// Table B.59 byte 25 note / Table B.58 On Change Background: "Writing this attribute at
+					// runtime shall fill this object, effectively erasing any content." The whole-canvas fill
+					// is the erase.
+					const std::uint8_t colour = static_cast<std::uint8_t>(rawAttributeData);
+					set_background_color(colour);
+					fill_canvas(colour);
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::FontAttributesObject:
+				{
+					set_font_attributes_object_id(static_cast<std::uint16_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::LineAttributesObject:
+				{
+					set_line_attributes_object_id(static_cast<std::uint16_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::FillAttributesObject:
+				{
+					set_fill_attributes_object_id(static_cast<std::uint16_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::Format:
+				{
+					if (static_cast<std::uint8_t>(rawAttributeData) <= static_cast<std::uint8_t>(Format::EightBitColour))
+					{
+						set_format(static_cast<Format>(static_cast<std::uint8_t>(rawAttributeData)));
+						retVal = true;
+					}
+					else
+					{
+						returnedError = AttributeError::InvalidValue;
+					}
+				}
+				break;
+
+				case AttributeName::Options:
+				{
+					// set_options masks the reserved bits 2-7 to zero (Table B.59 byte 33).
+					set_options(static_cast<std::uint8_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::TransparencyColour:
+				{
+					set_transparency_colour(static_cast<std::uint8_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				default:
+				{
+					// Type [0], Canvas Width [5] and Canvas Height [6] are read-only (bracketed AIDs).
+					returnedError = AttributeError::InvalidAttributeID;
+				}
+				break;
+			}
+		}
+		else
+		{
+			returnedError = AttributeError::InvalidAttributeID;
+		}
+		return retVal;
+	}
+
+	bool GraphicsContext::get_attribute(std::uint8_t attributeID, std::uint32_t &returnedAttributeData) const
+	{
+		bool retVal = false;
+
+		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
+		{
+			switch (static_cast<AttributeName>(attributeID))
+			{
+				case AttributeName::Type:
+				{
+					returnedAttributeData = static_cast<std::uint8_t>(get_object_type());
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ViewportWidth:
+				{
+					returnedAttributeData = get_width();
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ViewportHeight:
+				{
+					returnedAttributeData = get_height();
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ViewportX:
+				{
+					returnedAttributeData = static_cast<std::uint16_t>(viewportX);
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ViewportY:
+				{
+					returnedAttributeData = static_cast<std::uint16_t>(viewportY);
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::CanvasWidth:
+				{
+					returnedAttributeData = canvasWidth;
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::CanvasHeight:
+				{
+					returnedAttributeData = canvasHeight;
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ViewportZoom:
+				{
+					// AID 7 is a float returned as its raw bits, like the Output/Input Number Scale attribute.
+					std::uint32_t bits = 0;
+					std::memcpy(&bits, &viewportZoom, sizeof(float));
+					returnedAttributeData = bits;
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::GraphicsCursorX:
+				{
+					returnedAttributeData = static_cast<std::uint16_t>(cursorX);
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::GraphicsCursorY:
+				{
+					returnedAttributeData = static_cast<std::uint16_t>(cursorY);
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ForegroundColour:
+				{
+					returnedAttributeData = foregroundColour;
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::BackgroundColour:
+				{
+					returnedAttributeData = get_background_color();
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::FontAttributesObject:
+				{
+					returnedAttributeData = fontAttributesObjectID;
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::LineAttributesObject:
+				{
+					returnedAttributeData = lineAttributesObjectID;
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::FillAttributesObject:
+				{
+					returnedAttributeData = fillAttributesObjectID;
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::Format:
+				{
+					returnedAttributeData = static_cast<std::uint8_t>(format);
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::Options:
+				{
+					returnedAttributeData = optionsBitfield;
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::TransparencyColour:
+				{
+					returnedAttributeData = transparencyColour;
+					retVal = true;
+				}
+				break;
+
+				default:
+				{
+					// Do nothing, return false
+				}
+				break;
+			}
+		}
+		return retVal;
+	}
+
+	std::int16_t GraphicsContext::get_viewport_x() const
+	{
+		return viewportX;
+	}
+
+	void GraphicsContext::set_viewport_x(std::int16_t value)
+	{
+		viewportX = value;
+	}
+
+	std::int16_t GraphicsContext::get_viewport_y() const
+	{
+		return viewportY;
+	}
+
+	void GraphicsContext::set_viewport_y(std::int16_t value)
+	{
+		viewportY = value;
+	}
+
+	std::uint16_t GraphicsContext::get_canvas_width() const
+	{
+		return canvasWidth;
+	}
+
+	std::uint16_t GraphicsContext::get_canvas_height() const
+	{
+		return canvasHeight;
+	}
+
+	float GraphicsContext::get_viewport_zoom() const
+	{
+		return viewportZoom;
+	}
+
+	void GraphicsContext::set_viewport_zoom(float value)
+	{
+		viewportZoom = value;
+	}
+
+	std::int16_t GraphicsContext::get_cursor_x() const
+	{
+		return cursorX;
+	}
+
+	void GraphicsContext::set_cursor_x(std::int16_t value)
+	{
+		cursorX = value;
+	}
+
+	std::int16_t GraphicsContext::get_cursor_y() const
+	{
+		return cursorY;
+	}
+
+	void GraphicsContext::set_cursor_y(std::int16_t value)
+	{
+		cursorY = value;
+	}
+
+	void GraphicsContext::move_cursor(std::int32_t deltaX, std::int32_t deltaY)
+	{
+		// F.56: the cursor may be moved outside the canvas. It is clamped only to the signed 16-bit range
+		// the Graphics Cursor X/Y attributes (Table B.59) can represent, so a large relative move saturates
+		// rather than wrapping.
+		auto clampToInt16 = [](std::int32_t value) -> std::int16_t {
+			if (value < -32768)
+			{
+				return -32768;
+			}
+			if (value > 32767)
+			{
+				return 32767;
+			}
+			return static_cast<std::int16_t>(value);
+		};
+		cursorX = clampToInt16(static_cast<std::int32_t>(cursorX) + deltaX);
+		cursorY = clampToInt16(static_cast<std::int32_t>(cursorY) + deltaY);
+	}
+
+	std::uint8_t GraphicsContext::get_foreground_colour() const
+	{
+		return foregroundColour;
+	}
+
+	void GraphicsContext::set_foreground_colour(std::uint8_t value)
+	{
+		foregroundColour = value;
+	}
+
+	std::uint16_t GraphicsContext::get_font_attributes_object_id() const
+	{
+		return fontAttributesObjectID;
+	}
+
+	void GraphicsContext::set_font_attributes_object_id(std::uint16_t value)
+	{
+		fontAttributesObjectID = value;
+	}
+
+	std::uint16_t GraphicsContext::get_line_attributes_object_id() const
+	{
+		return lineAttributesObjectID;
+	}
+
+	void GraphicsContext::set_line_attributes_object_id(std::uint16_t value)
+	{
+		lineAttributesObjectID = value;
+	}
+
+	std::uint16_t GraphicsContext::get_fill_attributes_object_id() const
+	{
+		return fillAttributesObjectID;
+	}
+
+	void GraphicsContext::set_fill_attributes_object_id(std::uint16_t value)
+	{
+		fillAttributesObjectID = value;
+	}
+
+	GraphicsContext::Format GraphicsContext::get_format() const
+	{
+		return format;
+	}
+
+	void GraphicsContext::set_format(Format value)
+	{
+		format = value;
+	}
+
+	std::uint8_t GraphicsContext::get_options() const
+	{
+		return optionsBitfield;
+	}
+
+	void GraphicsContext::set_options(std::uint8_t value)
+	{
+		// Table B.59 byte 33: only bits 0 (transparency) and 1 (colour source) are defined; bits 2-7 are
+		// reserved and shall be zero, so they are never stored set.
+		optionsBitfield = static_cast<std::uint8_t>(value & 0x03u);
+	}
+
+	bool GraphicsContext::get_option(Options option) const
+	{
+		return 0u != (optionsBitfield & static_cast<std::uint8_t>(1u << static_cast<std::uint8_t>(option)));
+	}
+
+	std::uint8_t GraphicsContext::get_transparency_colour() const
+	{
+		return transparencyColour;
+	}
+
+	void GraphicsContext::set_transparency_colour(std::uint8_t value)
+	{
+		transparencyColour = value;
+	}
+
+	void GraphicsContext::allocate_canvas(std::uint16_t width, std::uint16_t height, std::uint8_t backgroundColourIndex)
+	{
+		canvasWidth = width;
+		canvasHeight = height;
+		// B.18 / Table B.59 byte 25 note: at parsing time the object is filled with the background colour.
+		canvas.assign(static_cast<std::size_t>(width) * static_cast<std::size_t>(height), backgroundColourIndex);
+	}
+
+	const std::vector<std::uint8_t> &GraphicsContext::get_canvas() const
+	{
+		return canvas;
+	}
+
+	std::uint8_t GraphicsContext::get_pixel(std::int32_t x, std::int32_t y) const
+	{
+		if ((x < 0) || (y < 0) ||
+		    (x >= static_cast<std::int32_t>(canvasWidth)) || (y >= static_cast<std::int32_t>(canvasHeight)))
+		{
+			return 0u;
+		}
+		return canvas[(static_cast<std::size_t>(y) * static_cast<std::size_t>(canvasWidth)) + static_cast<std::size_t>(x)];
+	}
+
+	void GraphicsContext::set_pixel(std::int32_t x, std::int32_t y, std::uint8_t colourIndex)
+	{
+		if ((x < 0) || (y < 0) ||
+		    (x >= static_cast<std::int32_t>(canvasWidth)) || (y >= static_cast<std::int32_t>(canvasHeight)))
+		{
+			return;
+		}
+		canvas[(static_cast<std::size_t>(y) * static_cast<std::size_t>(canvasWidth)) + static_cast<std::size_t>(x)] = colourIndex;
+	}
+
+	void GraphicsContext::fill_rectangle(std::int32_t x, std::int32_t y, std::int32_t width, std::int32_t height, std::uint8_t colourIndex)
+	{
+		if ((width <= 0) || (height <= 0) || canvas.empty())
+		{
+			return;
+		}
+
+		// F.56: "The graphics drawn by this command shall be clipped to the size of the canvas." Clip the
+		// rectangle to [0, canvasWidth) x [0, canvasHeight) before writing.
+		std::int32_t left = (x < 0) ? 0 : x;
+		std::int32_t top = (y < 0) ? 0 : y;
+		std::int32_t right = x + width;
+		std::int32_t bottom = y + height;
+		if (right > static_cast<std::int32_t>(canvasWidth))
+		{
+			right = static_cast<std::int32_t>(canvasWidth);
+		}
+		if (bottom > static_cast<std::int32_t>(canvasHeight))
+		{
+			bottom = static_cast<std::int32_t>(canvasHeight);
+		}
+
+		for (std::int32_t row = top; row < bottom; ++row)
+		{
+			const std::size_t rowStart = static_cast<std::size_t>(row) * static_cast<std::size_t>(canvasWidth);
+			for (std::int32_t col = left; col < right; ++col)
+			{
+				canvas[rowStart + static_cast<std::size_t>(col)] = colourIndex;
+			}
+		}
+	}
+
+	void GraphicsContext::fill_canvas(std::uint8_t colourIndex)
+	{
+		std::fill(canvas.begin(), canvas.end(), colourIndex);
 	}
 
 	bool ObjectLabelReferenceList::has_duplicate_labelled_objects() const

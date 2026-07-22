@@ -453,6 +453,33 @@ namespace isobus
 		/// @returns true if the message was sent, otherwise false
 		bool send_control_audio_signal_termination(std::shared_ptr<ControlFunction> destination) const;
 
+		//----------------- Graphics Context (ISO 11783-6 F.56/F.57, Table B.59, Table F.1) --------
+
+		/// @brief The verdict a Graphics Context command (ISO 11783-6 F.56) host painter returns, which the
+		/// VT maps onto the F.57 response error byte (byte 5). Object-ID and sub-command-ID validity (F.57
+		/// bits 0 and 1) are checked by the VT before the painter is consulted, so the painter only reports
+		/// on a command whose object is a Graphics Context and whose sub-command ID is in range.
+		enum class GraphicsContextCommandResult : std::uint8_t
+		{
+			Executed, ///< F.57 byte 5 = 0: the sub-command executed
+			InvalidParameter, ///< F.57 byte 5 bit 2: a parameter is invalid (e.g. a referenced Line/Fill/Font object is absent or the wrong type)
+			InvalidResult, ///< F.57 byte 5 bit 3: the sub-command would produce an invalid result
+			NotExecuted ///< F.57 byte 5 bit 4 (any other error): a recognized sub-command the painter did not execute (a later-slice command, or no painter installed)
+		};
+
+		/// @brief A host painter invoked when a Graphics Context command (0xB8, ISO 11783-6 F.56) targets a
+		/// valid Graphics Context object with an in-range sub-command ID, before the F.57 response is sent;
+		/// the returned verdict becomes the response error byte. `objectID` names the Graphics Context object
+		/// (already validated), `subCommand` is the Table F.1 sub-command ID (already range-checked 0-20),
+		/// and `parameters`/`parameterLength` are the command bytes after the sub-command ID (F.56 bytes
+		/// 5-n). Runs synchronously on the CAN thread. With no painter installed the command is answered with
+		/// the F.57 "any other error" bit -- the VT's behaviour when it executes no drawing.
+		using GraphicsContextCommandCallback = std::function<GraphicsContextCommandResult(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> workingSet, std::uint16_t objectID, std::uint8_t subCommand, const std::uint8_t *parameters, std::size_t parameterLength)>;
+
+		/// @brief Installs (or clears, when passed an empty function) the Graphics Context command host painter.
+		/// @param[in] callback The painter the 0xB8 handler consults for its response verdict
+		void set_graphics_context_command_callback(GraphicsContextCommandCallback callback);
+
 		//----------------- Other Server Settings -----------------------------
 
 		/// @brief Returns the language command interface for the server, which
@@ -1404,6 +1431,27 @@ namespace isobus
 		/// @returns true if the message was sent, otherwise false.
 		bool send_set_audio_volume_response(std::uint8_t errorCode, std::shared_ptr<ControlFunction> destination) const;
 
+		/// @brief Handles a received Graphics Context command (0xB8, ISO 11783-6 F.56): validates that the
+		/// named object exists and is a Graphics Context (else F.57 bit 0) and that the sub-command ID is in
+		/// range 0-20 (else F.57 bit 1), bounds-checks the sub-command's fixed parameters, funnels the command
+		/// to the installed host painter for a verdict, and answers with the F.57 response carrying that
+		/// verdict's error byte, then dispatches a repaint when the painter executed. Runs on the CAN thread.
+		/// @param[in] data The received message data
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_graphics_context_command(const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Sends the Graphics Context response (ISO 11783-6 F.57): byte 1 command echo 0xB8, bytes 2-3
+		/// the object ID, byte 4 the sub-command ID, byte 5 the error bitfield (bit 0 invalid object ID or not
+		/// a Graphics Context, bit 1 invalid sub-command ID, bit 2 invalid parameter, bit 3 sub-command
+		/// produces invalid results, bit 4 any other error), bytes 6-8 reserved 0xFF. Routed through
+		/// send_response, the choke point that withholds a command's response inside a macro (4.6.11.4 f).
+		/// @param[in] objectID The Graphics Context object ID to echo
+		/// @param[in] subCommand The sub-command ID to echo
+		/// @param[in] errorBitfield The F.57 byte 5 error bitfield
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false.
+		bool send_graphics_context_response(std::uint16_t objectID, std::uint8_t subCommand, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
+
 		/// @brief Sends a response message to the Screen capture command
 		/// @param[in] item Item requested from the Screen Capture command
 		/// @param[in] path Path requested from the Screen Capture command
@@ -1432,6 +1480,7 @@ namespace isobus
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, WorkingSetLossReason> onWorkingSetLostEventDispatcher; ///< Event dispatcher for a working set being torn down (ISO 11783-6 4.6.9 / C.2.6), carrying the reason so the display layer can alert the operator
 		ControlAudioSignalCallback controlAudioSignalCallback; ///< Host callback for the Control Audio Signal command (0xA3, ISO 11783-6 F.10); unset preserves the acknowledge-with-no-error default
 		SetAudioVolumeCallback setAudioVolumeCallback; ///< Host callback for the Set Audio Volume command (0xA4, ISO 11783-6 F.12); unset preserves the acknowledge-with-no-error default
+		GraphicsContextCommandCallback graphicsContextCommandCallback; ///< Host painter for the Graphics Context command (0xB8, ISO 11783-6 F.56); unset answers with the F.57 any-other-error bit
 		LanguageCommandInterface languageCommandInterface; ///< The language command interface for the server
 		std::shared_ptr<InternalControlFunction> serverInternalControlFunction; ///< The internal control function for the server
 		std::vector<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>> managedWorkingSetList; ///< The list of managed working sets
