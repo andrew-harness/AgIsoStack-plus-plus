@@ -630,6 +630,11 @@ namespace isobus
 		}
 	}
 
+	EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, VirtualTerminalServer::WorkingSetLossReason> &VirtualTerminalServer::get_on_working_set_lost_event_dispatcher()
+	{
+		return onWorkingSetLostEventDispatcher;
+	}
+
 	bool VirtualTerminalServer::tear_down_lost_working_sets()
 	{
 		// Tear down a working set on either of two triggers. Both delete its object pool, drop it as
@@ -707,6 +712,13 @@ namespace isobus
 				{
 					LOG_ERROR("[VT Server]: Working set at address %u lost - no Working Set Maintenance message for over 3 s. Deleting its object pool per ISO 11783-6 4.6.9.", lostAddress);
 				}
+
+				// Clause 4.6.9 requires the VT to alert the operator on an unexpected working-set shutdown,
+				// and C.2.6 on an invalid runtime pool update; the means is proprietary to the VT. The alert
+				// itself is a display-layer concern, so this raises the event with the working set (still
+				// valid here, before the erase below) and the reason, and the derived server's listener
+				// surfaces it. The logging above is the diagnostic record; this is the operator-facing seam.
+				onWorkingSetLostEventDispatcher.call(ws, poolInvalidated ? WorkingSetLossReason::InvalidObjectPoolUpdate : WorkingSetLossReason::MaintenanceTimeout);
 
 				if ((ws == activeWorkingSet) ||
 				    (workingSetHasControlFunction && (lostAddress == activeWorkingSetMasterAddress)))

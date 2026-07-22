@@ -391,6 +391,23 @@ namespace isobus
 		/// @returns The event dispatcher for an Alarm Mask becoming the displayed mask
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t> &get_on_alarm_mask_displayed_event_dispatcher();
 
+		/// @brief Why a working set was torn down, carried by the working-set-lost event so the display
+		/// layer can tell the operator which condition occurred.
+		enum class WorkingSetLossReason : std::uint8_t
+		{
+			MaintenanceTimeout = 0, ///< ISO 11783-6 clause 4.6.9: no Working Set Maintenance message for over 3 s while its object pool was present
+			InvalidObjectPoolUpdate = 1 ///< ISO 11783-6 clause C.2.6: a runtime object pool update failed to parse, so the entire pool is deleted and the working set suspended
+		};
+
+		/// @brief Returns the event dispatcher raised when a working set is torn down, carrying the lost
+		/// working set and the reason it was lost. ISO 11783-6 clause 4.6.9 requires the VT to "alert the
+		/// operator to this condition" on an unexpected working-set shutdown, by a means "proprietary to
+		/// the VT"; this event is the seam the display layer registers to surface that alert (and the
+		/// equivalent C.2.6 suspension). It is raised from the loss-teardown pass in update(), on the CAN
+		/// thread, while the working set is still valid and before it is erased.
+		/// @returns The event dispatcher for a working set being torn down
+		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, WorkingSetLossReason> &get_on_working_set_lost_event_dispatcher();
+
 		//----------------- Other Server Settings -----------------------------
 
 		/// @brief Returns the language command interface for the server, which
@@ -1346,6 +1363,7 @@ namespace isobus
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t, std::uint16_t> onChangeActiveSoftKeyMaskEventDispatcher; ///< Event dispatcher for active softkey mask change events
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t, bool> onFocusObjectEventDispatcher; ///< Event dispatcher for focus object events
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t> onAlarmMaskDisplayedEventDispatcher; ///< Event dispatcher for an Alarm Mask appearing or reappearing as the displayed mask (ISO 11783-6 4.6.14 c)
+		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, WorkingSetLossReason> onWorkingSetLostEventDispatcher; ///< Event dispatcher for a working set being torn down (ISO 11783-6 4.6.9 / C.2.6), carrying the reason so the display layer can alert the operator
 		LanguageCommandInterface languageCommandInterface; ///< The language command interface for the server
 		std::shared_ptr<InternalControlFunction> serverInternalControlFunction; ///< The internal control function for the server
 		std::vector<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>> managedWorkingSetList; ///< The list of managed working sets
