@@ -2314,16 +2314,12 @@ namespace isobus
 				break;
 
 			case Function::ControlAudioSignalCommand:
-			{
-				send_audio_signal_successful(message.get_source_control_function());
-			}
-			break;
+				handle_control_audio_signal_command(data, message.get_source_control_function());
+				break;
 
 			case Function::SetAudioVolumeCommand:
-			{
-				send_audio_volume_response(message.get_source_control_function());
-			}
-			break;
+				handle_set_audio_volume_command(data, message.get_source_control_function());
+				break;
 
 			case Function::IdentifyVTMessage:
 			{
@@ -3128,12 +3124,6 @@ namespace isobus
 		return send_response(buffer.data(), static_cast<std::uint32_t>(buffer.size()), destination);
 	}
 
-	bool VirtualTerminalServer::send_audio_signal_successful(std::shared_ptr<ControlFunction> destination) const
-	{
-		std::vector<std::uint8_t> buffer = { static_cast<std::uint8_t>(Function::ControlAudioSignalCommand), 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-		return send_response(buffer.data(), CAN_DATA_LENGTH, destination);
-	}
-
 	bool VirtualTerminalServer::send_get_window_mask_data_response(std::shared_ptr<ControlFunction> destination) const
 	{
 		std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = { 0 };
@@ -3147,12 +3137,6 @@ namespace isobus
 		buffer[6] = 0xFF; // Reserved
 		buffer[7] = 0xFF; // Reserved
 
-		return send_response(buffer.data(), CAN_DATA_LENGTH, destination);
-	}
-
-	bool VirtualTerminalServer::send_audio_volume_response(std::shared_ptr<ControlFunction> destination) const
-	{
-		std::vector<std::uint8_t> buffer = { static_cast<std::uint8_t>(Function::SetAudioVolumeCommand), 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 		return send_response(buffer.data(), CAN_DATA_LENGTH, destination);
 	}
 

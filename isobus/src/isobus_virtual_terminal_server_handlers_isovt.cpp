@@ -23,6 +23,7 @@
 
 #include <iomanip>
 #include <sstream>
+#include <utility>
 
 namespace isobus
 {
@@ -920,6 +921,141 @@ namespace isobus
 			};
 
 			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
+		}
+		return retVal;
+	}
+
+	void VirtualTerminalServer::set_control_audio_signal_callback(ControlAudioSignalCallback callback)
+	{
+		controlAudioSignalCallback = std::move(callback);
+	}
+
+	void VirtualTerminalServer::set_set_audio_volume_callback(SetAudioVolumeCallback callback)
+	{
+		setAudioVolumeCallback = std::move(callback);
+	}
+
+	void VirtualTerminalServer::handle_control_audio_signal_command(const std::vector<std::uint8_t> &data, std::shared_ptr<ControlFunction> source)
+	{
+		// F.10: byte 2 activations (0 terminates any audio in process from the source, and frequency and
+		// the durations are then ignored), bytes 3-4 frequency Hz, bytes 5-6 on-time ms, bytes 7-8
+		// off-time ms, all little-endian like the surrounding change commands.
+		const std::uint8_t activations = data[1];
+		const std::uint16_t frequencyHz = get_little_endian_uint16(data, 2);
+		const std::uint16_t onTimeMs = get_little_endian_uint16(data, 4);
+		const std::uint16_t offTimeMs = get_little_endian_uint16(data, 6);
+
+		AudioSignalCommandResult verdict = AudioSignalCommandResult::Acknowledged;
+		if (controlAudioSignalCallback)
+		{
+			verdict = controlAudioSignalCallback(source, activations, frequencyHz, onTimeMs, offTimeMs);
+		}
+
+		// F.11 byte 2: bit 0 audio device busy, bit 4 any other error, 0 no error. F.10 has no
+		// "not supported" bit, so that verdict maps to any-other-error for this command.
+		std::uint8_t errorCode = 0;
+		switch (verdict)
+		{
+			case AudioSignalCommandResult::AudioDeviceIsBusy:
+				errorCode = get_bit(0);
+				break;
+			case AudioSignalCommandResult::NotSupported:
+			case AudioSignalCommandResult::AnyOtherError:
+				errorCode = get_bit(4);
+				break;
+			case AudioSignalCommandResult::Acknowledged:
+			default:
+				errorCode = 0;
+				break;
+		}
+
+		send_control_audio_signal_response(errorCode, source);
+		LOG_DEBUG("[VT Server]: Client %u control audio signal command: activations %u, %u Hz, on %u ms, off %u ms -> error %u", source->get_address(), activations, frequencyHz, onTimeMs, offTimeMs, errorCode);
+	}
+
+	void VirtualTerminalServer::handle_set_audio_volume_command(const std::vector<std::uint8_t> &data, std::shared_ptr<ControlFunction> source)
+	{
+		// F.12: byte 2 is the volume as a percent (0-100) of the operator-set maximum.
+		const std::uint8_t volumePercent = data[1];
+
+		AudioSignalCommandResult verdict = AudioSignalCommandResult::Acknowledged;
+		if (setAudioVolumeCallback)
+		{
+			verdict = setAudioVolumeCallback(source, volumePercent);
+		}
+
+		// F.13 byte 2: bit 0 audio device busy, bit 1 command not supported (VT version 4 and later),
+		// bit 4 any other error, 0 no error.
+		std::uint8_t errorCode = 0;
+		switch (verdict)
+		{
+			case AudioSignalCommandResult::AudioDeviceIsBusy:
+				errorCode = get_bit(0);
+				break;
+			case AudioSignalCommandResult::NotSupported:
+				errorCode = get_bit(1);
+				break;
+			case AudioSignalCommandResult::AnyOtherError:
+				errorCode = get_bit(4);
+				break;
+			case AudioSignalCommandResult::Acknowledged:
+			default:
+				errorCode = 0;
+				break;
+		}
+
+		send_set_audio_volume_response(errorCode, source);
+		LOG_DEBUG("[VT Server]: Client %u set audio volume command: %u percent -> error %u", source->get_address(), volumePercent, errorCode);
+	}
+
+	bool VirtualTerminalServer::send_control_audio_signal_response(std::uint8_t errorCode, std::shared_ptr<ControlFunction> destination) const
+	{
+		// F.11: byte 1 command echo, byte 2 error bitfield, bytes 3-8 reserved 0xFF. Routed through
+		// send_response, the choke point that withholds a command's response inside a macro (4.6.11.4 f).
+		const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+			static_cast<std::uint8_t>(Function::ControlAudioSignalCommand),
+			errorCode,
+			0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+		};
+		return send_response(buffer.data(), CAN_DATA_LENGTH, destination);
+	}
+
+	bool VirtualTerminalServer::send_set_audio_volume_response(std::uint8_t errorCode, std::shared_ptr<ControlFunction> destination) const
+	{
+		// F.13: byte 1 command echo, byte 2 error bitfield, bytes 3-8 reserved 0xFF. Routed through
+		// send_response like the Control Audio Signal response.
+		const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+			static_cast<std::uint8_t>(Function::SetAudioVolumeCommand),
+			errorCode,
+			0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+		};
+		return send_response(buffer.data(), CAN_DATA_LENGTH, destination);
+	}
+
+	bool VirtualTerminalServer::send_control_audio_signal_termination(std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			// H.22: byte 1 VT function 0x0A, byte 2 termination cause with bit 0 set (the only defined
+			// cause), bytes 3-8 reserved 0xFF.
+			const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+				static_cast<std::uint8_t>(Function::VTControlAudioSignalTerminationMessage),
+				get_bit(0),
+				0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+			};
+
+			// Like the VT ESC and Pointing Event messages, this goes directly onto the bus rather than
+			// through send_response: H.22 is a VT-originated event (the VT terminated a Control Audio
+			// Signal before completion), not a response to a command, so it must reach the working set
+			// even during macro execution, which 4.6.11.4 f suppresses only for command responses.
+			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
+			                                                        buffer.data(),
+			                                                        CAN_DATA_LENGTH,
+			                                                        serverInternalControlFunction,
+			                                                        destination,
+			                                                        get_priority());
 		}
 		return retVal;
 	}

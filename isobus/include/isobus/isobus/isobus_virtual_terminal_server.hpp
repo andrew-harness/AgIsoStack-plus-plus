@@ -19,6 +19,7 @@
 
 #include <array>
 #include <deque>
+#include <functional>
 
 namespace isobus
 {
@@ -407,6 +408,50 @@ namespace isobus
 		/// thread, while the working set is still valid and before it is erased.
 		/// @returns The event dispatcher for a working set being torn down
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, WorkingSetLossReason> &get_on_working_set_lost_event_dispatcher();
+
+		//----------------- Client audio (ISO 11783-6 F.10-F.13, H.22) --------
+
+		/// @brief The verdict a Control Audio Signal (ISO 11783-6 F.10) or Set Audio Volume (F.12) host
+		/// callback returns, which the VT maps onto the F.11 / F.13 response error byte.
+		enum class AudioSignalCommandResult : std::uint8_t
+		{
+			Acknowledged, ///< No error: F.11 / F.13 byte 2 = 0
+			AudioDeviceIsBusy, ///< F.11 byte 2 bit 0 / F.13 byte 2 bit 0: the audio device is busy
+			NotSupported, ///< F.13 byte 2 bit 1 (Set Audio Volume only, VT version 4 and later): command not supported
+			AnyOtherError ///< F.11 byte 2 bit 4 / F.13 byte 2 bit 4: any other error
+		};
+
+		/// @brief A host callback invoked when a Control Audio Signal command (0xA3, ISO 11783-6 F.10) is
+		/// received, before the F.11 response is sent; the returned verdict becomes the response error
+		/// byte. The fields are decoded little-endian per F.10: `activations` (0 terminates any audio in
+		/// process from the source), `frequencyHz`, `onTimeMs`, `offTimeMs`. Runs synchronously on the CAN
+		/// thread. With no callback installed the command is acknowledged with no error -- the VT's
+		/// behaviour when it plays no audio.
+		using ControlAudioSignalCallback = std::function<AudioSignalCommandResult(std::shared_ptr<ControlFunction> source, std::uint8_t activations, std::uint16_t frequencyHz, std::uint16_t onTimeMs, std::uint16_t offTimeMs)>;
+
+		/// @brief A host callback invoked when a Set Audio Volume command (0xA4, ISO 11783-6 F.12) is
+		/// received, before the F.13 response is sent; the returned verdict becomes the response error
+		/// byte. `volumePercent` is the volume 0-100 of the operator-set maximum. Runs synchronously on
+		/// the CAN thread. With no callback installed the command is acknowledged with no error.
+		using SetAudioVolumeCallback = std::function<AudioSignalCommandResult(std::shared_ptr<ControlFunction> source, std::uint8_t volumePercent)>;
+
+		/// @brief Installs (or clears, when passed an empty function) the Control Audio Signal host callback.
+		/// @param[in] callback The callback the 0xA3 handler consults for its response verdict
+		void set_control_audio_signal_callback(ControlAudioSignalCallback callback);
+
+		/// @brief Installs (or clears, when passed an empty function) the Set Audio Volume host callback.
+		/// @param[in] callback The callback the 0xA4 handler consults for its response verdict
+		void set_set_audio_volume_callback(SetAudioVolumeCallback callback);
+
+		/// @brief Sends the VT Control Audio Signal Termination message (ISO 11783-6 Annex H.22, VT
+		/// function 0x0A) to a control function whose Control Audio Signal command the VT terminated before
+		/// completion. Byte 2 termination cause bit 0 is set (the only defined cause); bytes 3-8 are 0xFF.
+		/// H.22 has no response and, per its own text, is not sent when the VT terminates an acoustic
+		/// signal from a lower priority Alarm Mask. Sent directly onto the bus rather than through the
+		/// macro-suppressed response path, because it is a VT-originated event, not a command response.
+		/// @param[in] destination The control function whose audio was terminated
+		/// @returns true if the message was sent, otherwise false
+		bool send_control_audio_signal_termination(std::shared_ptr<ControlFunction> destination) const;
 
 		//----------------- Other Server Settings -----------------------------
 
@@ -1328,15 +1373,36 @@ namespace isobus
 		/// @returns true if the message was sent, otherwise false.
 		bool send_supported_objects(std::shared_ptr<ControlFunction> destination) const;
 
-		/// @brief Sends the Control Audio Signal response to the client with "No errors" error code
-		/// @param[in] destination The control function to send the message to
-		/// @returns true if the message was sent, otherwise false.
-		bool send_audio_signal_successful(std::shared_ptr<ControlFunction> destination) const;
+		/// @brief Handles a received Control Audio Signal command (0xA3, ISO 11783-6 F.10): decodes the
+		/// activations/frequency/on-time/off-time fields, consults the installed host callback for a
+		/// verdict, and answers with the F.11 response carrying that verdict's error byte. With no callback
+		/// installed the command is acknowledged with no error.
+		/// @param[in] data The received message data
+		/// @param[in] source The control function that sent the command
+		void handle_control_audio_signal_command(const std::vector<std::uint8_t> &data, std::shared_ptr<ControlFunction> source);
 
-		/// @brief Sends the Set Audio Volume response to the client with "No error" error code
+		/// @brief Handles a received Set Audio Volume command (0xA4, ISO 11783-6 F.12): decodes the volume
+		/// percent, consults the installed host callback for a verdict, and answers with the F.13 response
+		/// carrying that verdict's error byte. With no callback installed the command is acknowledged with
+		/// no error.
+		/// @param[in] data The received message data
+		/// @param[in] source The control function that sent the command
+		void handle_set_audio_volume_command(const std::vector<std::uint8_t> &data, std::shared_ptr<ControlFunction> source);
+
+		/// @brief Sends the Control Audio Signal response (ISO 11783-6 F.11) with the given error byte
+		/// (bit 0 audio device busy, bit 4 any other error, 0 no error); bytes 3-8 are 0xFF.
+		/// @param[in] errorCode The F.11 byte 2 error bitfield
 		/// @param[in] destination The control function to send the message to
 		/// @returns true if the message was sent, otherwise false.
-		bool send_audio_volume_response(std::shared_ptr<ControlFunction> destination) const;
+		bool send_control_audio_signal_response(std::uint8_t errorCode, std::shared_ptr<ControlFunction> destination) const;
+
+		/// @brief Sends the Set Audio Volume response (ISO 11783-6 F.13) with the given error byte (bit 0
+		/// audio device busy, bit 1 command not supported, bit 4 any other error, 0 no error); bytes 3-8
+		/// are 0xFF.
+		/// @param[in] errorCode The F.13 byte 2 error bitfield
+		/// @param[in] destination The control function to send the message to
+		/// @returns true if the message was sent, otherwise false.
+		bool send_set_audio_volume_response(std::uint8_t errorCode, std::shared_ptr<ControlFunction> destination) const;
 
 		/// @brief Sends a response message to the Screen capture command
 		/// @param[in] item Item requested from the Screen Capture command
@@ -1364,6 +1430,8 @@ namespace isobus
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t, bool> onFocusObjectEventDispatcher; ///< Event dispatcher for focus object events
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, std::uint16_t> onAlarmMaskDisplayedEventDispatcher; ///< Event dispatcher for an Alarm Mask appearing or reappearing as the displayed mask (ISO 11783-6 4.6.14 c)
 		EventDispatcher<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>, WorkingSetLossReason> onWorkingSetLostEventDispatcher; ///< Event dispatcher for a working set being torn down (ISO 11783-6 4.6.9 / C.2.6), carrying the reason so the display layer can alert the operator
+		ControlAudioSignalCallback controlAudioSignalCallback; ///< Host callback for the Control Audio Signal command (0xA3, ISO 11783-6 F.10); unset preserves the acknowledge-with-no-error default
+		SetAudioVolumeCallback setAudioVolumeCallback; ///< Host callback for the Set Audio Volume command (0xA4, ISO 11783-6 F.12); unset preserves the acknowledge-with-no-error default
 		LanguageCommandInterface languageCommandInterface; ///< The language command interface for the server
 		std::shared_ptr<InternalControlFunction> serverInternalControlFunction; ///< The internal control function for the server
 		std::vector<std::shared_ptr<VirtualTerminalServerManagedWorkingSet>> managedWorkingSetList; ///< The list of managed working sets
