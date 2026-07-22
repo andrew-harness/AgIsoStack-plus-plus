@@ -248,9 +248,14 @@ namespace isobus
 
 	void VirtualTerminalServer::execute_macro_as_rx_message(const CANMessage &message)
 	{
+		// A macro replays each stored command packet as a received message. Most are a single 8-byte frame,
+		// but a macro command can be longer -- Change Child Position (9 bytes) and the variable Graphics
+		// Context (Draw Polygon / Draw Text / Pan and Zoom) and Change String Value commands all exceed one
+		// frame (Table B.56 stores them at their natural length). Accept any packet at least one CAN frame
+		// long; process_rx_message applies each function's own length validation.
 		if ((message.get_destination_control_function() == serverInternalControlFunction) &&
 		    (message.get_source_control_function() != nullptr) &&
-		    (CAN_DATA_LENGTH == message.get_data_length()))
+		    (CAN_DATA_LENGTH <= message.get_data_length()))
 		{
 			process_rx_message(message, this);
 		}

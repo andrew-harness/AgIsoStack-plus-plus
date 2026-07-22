@@ -2280,6 +2280,58 @@ namespace isobus
 											}
 										}
 										break;
+									case Macro::Command::GraphicsContextCommand:
+									{
+										// A macro stores a Graphics Context command exactly as it travels on the bus (Table
+										// B.56: "Use formats from Annex F"): byte 3 is the F.56 sub-command, then its
+										// parameters. Most sub-commands fit one 8-byte frame, but Draw Polygon (12), Draw Text
+										// (13) and Pan and Zoom Viewport (16) can exceed it, so the stored length is the
+										// sub-command's natural F.56 length, floored at 8 (Table B.56 pads a shorter packet --
+										// a zero-point polygon or a one-character text -- up to the 8-byte boundary). The
+										// point-count byte (Draw Polygon byte 4) and text-length byte (Draw Text byte 5) have
+										// to be inside the region before they can be read.
+										if (bytesRemainingInRegion < 4)
+										{
+											commandLengthResolved = false; // no sub-command byte to read
+										}
+										else
+										{
+											switch (iopData[3])
+											{
+												case 0x0C: // F.56 sub-command 12 Draw Polygon: byte 4 point count N, then N x 4 bytes.
+													if (bytesRemainingInRegion < 5)
+													{
+														commandLengthResolved = false;
+													}
+													else
+													{
+														commandLength = 5 + (4 * iopData[4]);
+													}
+													break;
+												case 0x0D: // F.56 sub-command 13 Draw Text: byte 5 text length L, then L text bytes.
+													if (bytesRemainingInRegion < 6)
+													{
+														commandLengthResolved = false;
+													}
+													else
+													{
+														commandLength = 6 + iopData[5];
+													}
+													break;
+												case 0x10: // F.56 sub-command 16 Pan and Zoom Viewport: a fixed 12-byte packet.
+													commandLength = 12;
+													break;
+												default: // every single-frame sub-command fits one 8-byte frame.
+													commandLength = 8;
+													break;
+											}
+											if (commandLength < 8)
+											{
+												commandLength = 8; // Table B.56: pad a short packet to the 8-byte boundary.
+											}
+										}
+										break;
+									}
 									default:
 										// Every other allowed command is a single 8-byte frame (Table B.56 pads a short
 										// command up to 8). This covers the single-frame Graphics Context sub-commands.
