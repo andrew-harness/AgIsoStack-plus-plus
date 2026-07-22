@@ -2269,10 +2269,24 @@ namespace isobus
 										// bytes, so it is stored and replayed like any other 8-byte macro command.
 										// execute_macro replays each stored packet as an rx message, so execution
 										// runs through the 0xB8 case of process_connection_dependent_messages. This
-										// covers sub-commands 0-7, whose parameters all fit one frame; sub-commands
-										// whose parameters exceed 8 bytes (12 Draw Polygon, 13 Draw Text, 16 Pan
-										// and Zoom) are carried by Transport Protocol and need sub-command-aware
-										// length handling, deferred with their drawing slices.
+										// covers every single-frame sub-command (0-11, 14, 15, 17-20). The
+										// variable-length sub-commands -- 12 Draw Polygon, 13 Draw Text and 16 Pan
+										// and Zoom -- can exceed one frame, and the macro model stores those fine
+										// (Macro::add_command_packet holds an arbitrary-length vector, exactly as the
+										// ChangeStringValue case below stores 5 + stringLength bytes). What is
+										// deferred is the PARSE-loop length: reading a variable GC command out of
+										// the pool means computing its stored length from the sub-command's own
+										// count / string-length byte (byte 5 for 12, byte 6 for 13), and doing that
+										// safely also requires settling whether the short fixed sub-commands (2-6, at
+										// 5 or 6 natural bytes) are stored FF-padded to 8 here or unpadded -- this
+										// fixed-8 handling assumes padded, and no reference pool has yet pinned the
+										// encoding, so advancing by a computed natural length for one sub-command
+										// while padding another would desync the stream. The wire path (a TP-
+										// reassembled 0xB8) is bounded and executed in slice G2; a variable GC
+										// command inside a macro is left for a slice with a reference pool to verify
+										// against. A crafted pool declaring one of these inside a macro is not a
+										// crash risk: it stores 8 bytes and advances 8, the same bounded read every
+										// other case makes.
 										retVal = tempObject->add_command_packet({
 										  iopData[0],
 										  iopData[1],

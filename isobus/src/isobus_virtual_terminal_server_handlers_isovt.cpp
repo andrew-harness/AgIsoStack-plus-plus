@@ -1064,15 +1064,22 @@ namespace isobus
 		}
 
 		// F.56: a sub-command smaller than 8 bytes is padded to 8, so every fixed-length sub-command's
-		// parameters arrive in one frame. Bound the fixed parameters here so the painter cannot read past
-		// the received data. Sub-commands 8-20 are not executed in this slice; the painter returns
-		// NotExecuted and reads no parameters, so they need no bound here.
+		// parameters arrive in one frame; a larger one uses Transport Protocol and arrives reassembled here.
+		// Bound each sub-command's parameters against the received length so the painter cannot read past the
+		// data. Sub-commands 8-13 are the drawing primitives (fixed 4-byte for 8-11; variable for 12 Draw
+		// Polygon and 13 Draw Text, whose declared point-count / string-length byte sets the length). Sub-
+		// commands 14-20 are not executed in this slice; the painter returns NotExecuted and reads no
+		// parameters, so they need no bound here.
 		std::size_t requiredParameterBytes = 0;
 		switch (static_cast<GraphicsContextSubCommandID>(subCommand))
 		{
 			case GraphicsContextSubCommandID::SetGraphicsCursor: // F.56 bytes 5-8: X, Y (signed)
 			case GraphicsContextSubCommandID::MoveGraphicsCursor: // F.56 bytes 5-8: X offset, Y offset (signed)
 			case GraphicsContextSubCommandID::EraseRectangle: // F.56 bytes 5-8: width, height
+			case GraphicsContextSubCommandID::DrawPoint: // F.56 bytes 5-8: X, Y offset (signed)
+			case GraphicsContextSubCommandID::DrawLine: // F.56 bytes 5-8: end X, Y offset (signed)
+			case GraphicsContextSubCommandID::DrawRectangle: // F.56 bytes 5-8: width, height
+			case GraphicsContextSubCommandID::DrawClosedEllipse: // F.56 bytes 5-8: width, height
 				requiredParameterBytes = 4;
 				break;
 
@@ -1087,6 +1094,34 @@ namespace isobus
 				requiredParameterBytes = 2;
 				break;
 
+			case GraphicsContextSubCommandID::DrawPolygon:
+				// F.56 sub-command 12: byte 5 is the point count N, then N points of 4 bytes each. Validate
+				// the count byte is present, then the whole point list against the declared count. A count
+				// that overruns the received data is a bit-2 parameter error (the frame did not carry the
+				// points it declared).
+				if (data.size() < 5u)
+				{
+					requiredParameterBytes = 1; // no count byte: fail the length check below with bit 2
+				}
+				else
+				{
+					requiredParameterBytes = 1u + (4u * static_cast<std::size_t>(data[4]));
+				}
+				break;
+
+			case GraphicsContextSubCommandID::DrawText:
+				// F.56 sub-command 13: byte 5 opacity, byte 6 text length L, then L text bytes. Validate the
+				// opacity and length bytes are present, then the whole string against the declared length.
+				if (data.size() < 6u)
+				{
+					requiredParameterBytes = 2; // no length byte: fail the length check below with bit 2
+				}
+				else
+				{
+					requiredParameterBytes = 2u + static_cast<std::size_t>(data[5]);
+				}
+				break;
+
 			default:
 				requiredParameterBytes = 0;
 				break;
@@ -1094,7 +1129,9 @@ namespace isobus
 
 		if (data.size() < (4u + requiredParameterBytes))
 		{
-			// F.57 byte 5 bit 2: the parameter is invalid because the frame is too short to carry it.
+			// F.57 byte 5 bit 2: the parameter is invalid because the message is too short to carry it -- the
+			// declared point count (sub-command 12) or string length (sub-command 13) exceeds the data
+			// received, or a fixed-length sub-command's frame is short.
 			send_graphics_context_response(objectID, subCommand, get_bit(2), managedWorkingSet->get_control_function());
 			LOG_WARNING("[VT Server]: Client %u graphics context command on object %u sub-command %u is too short for its parameters", managedWorkingSet->get_control_function()->get_address(), objectID, subCommand);
 			return;
