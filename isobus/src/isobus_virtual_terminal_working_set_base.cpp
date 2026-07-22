@@ -2246,87 +2246,56 @@ namespace isobus
 
 							while (numberBytesProcessed < numberBytesToFollow)
 							{
+								// Table B.56: each stored command packet is at least 8 bytes -- a command shorter
+								// than 8 bytes is FF-padded up to the 8-byte boundary -- and a command whose Annex F
+								// length is longer (Change Child Position at 9 bytes, Change String Value) stores that
+								// natural length. Resolve the stored length from the command multiplexor BEFORE the
+								// body is copied, then reject any command whose length runs past the macro's declared
+								// command region: the macro-level guard above proved only that the region itself is
+								// present, so a fixed read reaching past it would otherwise walk off the pool buffer.
+								const std::uint16_t bytesRemainingInRegion = static_cast<std::uint16_t>(numberBytesToFollow - numberBytesProcessed);
 								auto commandLength = 8;
+								bool commandLengthResolved = true;
 								switch (static_cast<Macro::Command>(iopData[0]))
 								{
 									case Macro::Command::ChangeChildPosition:
-										// special case: 9 bytes
-										retVal = tempObject->add_command_packet({
-										  iopData[0],
-										  iopData[1],
-										  iopData[2],
-										  iopData[3],
-										  iopData[4],
-										  iopData[5],
-										  iopData[6],
-										  iopData[7],
-										  iopData[8],
-										});
-										commandLength = 9;
-										break;
-									case Macro::Command::GraphicsContextCommand:
-										// F.56: a Graphics Context command carried by one CAN frame is padded to 8
-										// bytes, so it is stored and replayed like any other 8-byte macro command.
-										// execute_macro replays each stored packet as an rx message, so execution
-										// runs through the 0xB8 case of process_connection_dependent_messages. This
-										// covers every single-frame sub-command (0-11, 14, 15, 17-20). The
-										// variable-length sub-commands -- 12 Draw Polygon, 13 Draw Text and 16 Pan
-										// and Zoom -- can exceed one frame, and the macro model stores those fine
-										// (Macro::add_command_packet holds an arbitrary-length vector, exactly as the
-										// ChangeStringValue case below stores 5 + stringLength bytes). What is
-										// deferred is the PARSE-loop length: reading a variable GC command out of
-										// the pool means computing its stored length from the sub-command's own
-										// count / string-length byte (byte 5 for 12, byte 6 for 13), and doing that
-										// safely also requires settling whether the short fixed sub-commands (2-6, at
-										// 5 or 6 natural bytes) are stored FF-padded to 8 here or unpadded -- this
-										// fixed-8 handling assumes padded, and no reference pool has yet pinned the
-										// encoding, so advancing by a computed natural length for one sub-command
-										// while padding another would desync the stream. The wire path (a TP-
-										// reassembled 0xB8) is bounded and executed in slice G2; a variable GC
-										// command inside a macro is left for a slice with a reference pool to verify
-										// against. A crafted pool declaring one of these inside a macro is not a
-										// crash risk: it stores 8 bytes and advances 8, the same bounded read every
-										// other case makes.
-										retVal = tempObject->add_command_packet({
-										  iopData[0],
-										  iopData[1],
-										  iopData[2],
-										  iopData[3],
-										  iopData[4],
-										  iopData[5],
-										  iopData[6],
-										  iopData[7],
-										});
-										commandLength = 8;
+										commandLength = 9; // Annex F: a 9-byte packet.
 										break;
 									case Macro::Command::ChangeStringValue:
-									{
-										// Change string value has variable length
-										std::vector<std::uint8_t> command;
-										auto stringLength = get_little_endian_uint16(iopData, 3);
-										for (int i = 0; i < (stringLength + 5); i++)
+										// Annex F: bytes 3-4 are the string length; the packet is 5 + length bytes,
+										// floored at 8 -- Table B.56's padding example is literally this command ("e.g.
+										// Change String Value command on a two byte string"), so a conformant pool
+										// stores a short-string packet FF-padded to the 8-byte boundary. The length
+										// bytes have to be inside the region before they can be read.
+										if (bytesRemainingInRegion < 5)
 										{
-											command.push_back(iopData[i]);
+											commandLengthResolved = false;
 										}
-										retVal = tempObject->add_command_packet(command);
-										commandLength = 5 + stringLength;
+										else
+										{
+											commandLength = 5 + get_little_endian_uint16(iopData, 3);
+											if (commandLength < 8)
+											{
+												commandLength = 8;
+											}
+										}
 										break;
-									}
 									default:
-										// all other macro commands are 8 byte long
-										retVal = tempObject->add_command_packet({
-										  iopData[0],
-										  iopData[1],
-										  iopData[2],
-										  iopData[3],
-										  iopData[4],
-										  iopData[5],
-										  iopData[6],
-										  iopData[7],
-										});
+										// Every other allowed command is a single 8-byte frame (Table B.56 pads a short
+										// command up to 8). This covers the single-frame Graphics Context sub-commands.
 										commandLength = 8;
 										break;
 								}
+
+								if ((!commandLengthResolved) || (bytesRemainingInRegion < commandLength))
+								{
+									LOG_ERROR("[WS]: Macro object %u cannot be parsed because a command extends past its declared command region.", decodedID);
+									retVal = false;
+									break;
+								}
+
+								retVal = tempObject->add_command_packet(std::vector<std::uint8_t>(iopData, iopData + commandLength));
+
 								iopLength -= commandLength;
 								iopData += commandLength;
 								numberBytesProcessed += commandLength;
