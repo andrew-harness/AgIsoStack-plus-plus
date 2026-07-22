@@ -6047,7 +6047,15 @@ namespace isobus
 
 				case AttributeName::Options:
 				{
-					set_options(static_cast<std::uint8_t>(rawAttributeData));
+					// ISO 11783-6 Table B.41: Options bit 2 (Run-Length Encoded) "cannot be changed during
+					// runtime by Change Attribute command. (Any change will be ignored by the VT.)" That bit
+					// selects how the stored raw data is interpreted, so honouring a change would make the
+					// retained bitmap unreadable. Bits 0 (transparent) and 1 (flashing) are changeable, so the
+					// incoming value is applied with bit 2 masked back to its parse-time state. The command
+					// still succeeds: the standard ignores the bit-2 change, it does not fail the command.
+					const std::uint8_t rleMask = static_cast<std::uint8_t>(1U << static_cast<std::uint8_t>(Options::RunLengthEncoded));
+					const std::uint8_t newOptions = static_cast<std::uint8_t>((static_cast<std::uint8_t>(rawAttributeData) & static_cast<std::uint8_t>(~rleMask)) | (optionsBitfield & rleMask));
+					set_options(newOptions);
 					retVal = true;
 				}
 				break;

@@ -1739,13 +1739,26 @@ namespace isobus
 
 							retVal = parse_object_macro_reference(tempObject, numberOfMacrosToFollow, iopData, iopLength);
 
-							if (tempObject->get_raw_data().size() == tempObject->get_actual_width() * tempObject->get_actual_height())
+							const std::size_t expectedPixelCount = static_cast<std::size_t>(tempObject->get_actual_width()) * tempObject->get_actual_height();
+
+							if (tempObject->get_raw_data().size() >= expectedPixelCount)
 							{
+								// ISO 11783-6 B.12.2: "If the data is longer than expected after all of the rows
+								// and columns of pixels have been defined, then the VT shall ignore all extra data
+								// bytes." The decode above consumed the whole declared raw-data blob so the trailing
+								// macro references stay aligned; the surplus decoded pixels are dropped here, so an
+								// oversize picture keeps exactly its actual width x height and renders rather than
+								// being reported as a dimension mismatch. An exact fit resizes to its own size.
+								tempObject->get_raw_data().resize(expectedPixelCount);
 								retVal = true;
 							}
 							else
 							{
-								LOG_ERROR("[WS]: Picture graphic object has invalid dimensions compared to its data. Object: " + isobus::to_string(static_cast<int>(decodedID)));
+								// Data shorter than the dimensions require leaves pixels undefined. The error is
+								// logged and the picture still enters the tree with its short pixel buffer -- the
+								// renderer draws only the pixels that exist -- and retVal keeps the macro parse's
+								// result, so the pool is not rejected for it.
+								LOG_ERROR("[WS]: Picture graphic object has less data than its dimensions require. Object: " + isobus::to_string(static_cast<int>(decodedID)));
 							}
 						}
 						else

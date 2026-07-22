@@ -2330,10 +2330,16 @@ TEST(VIRTUAL_TERMINAL_OBJECT_TESTS, PictureGraphicTests)
 	EXPECT_TRUE(pictureGraphic.set_attribute(static_cast<std::uint8_t>(PictureGraphic::AttributeName::Width), 90, objects, error));
 	EXPECT_EQ(90, pictureGraphic.get_width());
 
-	// Test an option (RLE in this case)
-	EXPECT_TRUE(pictureGraphic.set_attribute(static_cast<std::uint8_t>(PictureGraphic::AttributeName::Options), (1 << 2), objects, error));
-	EXPECT_TRUE(pictureGraphic.get_option(PictureGraphic::Options::RunLengthEncoded));
+	// ISO 11783-6 Table B.41: the RLE Options bit (bit 2) "cannot be changed during runtime by Change
+	// Attribute command. (Any change will be ignored by the VT.)" Bits 0 (transparent) and 1 (flashing)
+	// are changeable. From a cleared state, a Change Attribute setting bit 0 AND bit 2 applies bit 0 and
+	// leaves bit 2 clear, and still succeeds -- the standard ignores the bit-2 change, it does not fail.
+	pictureGraphic.set_options(0);
+	EXPECT_TRUE(pictureGraphic.set_attribute(static_cast<std::uint8_t>(PictureGraphic::AttributeName::Options), (1 << 0) | (1 << 2), objects, error));
+	EXPECT_TRUE(pictureGraphic.get_option(PictureGraphic::Options::Transparent));
+	EXPECT_FALSE(pictureGraphic.get_option(PictureGraphic::Options::RunLengthEncoded));
 
+	// The direct setter still moves the RLE bit both ways -- only the Change Attribute path is guarded.
 	pictureGraphic.set_option(PictureGraphic::Options::RunLengthEncoded, false);
 	EXPECT_FALSE(pictureGraphic.get_option(PictureGraphic::Options::RunLengthEncoded));
 	pictureGraphic.set_option(PictureGraphic::Options::RunLengthEncoded, true);
