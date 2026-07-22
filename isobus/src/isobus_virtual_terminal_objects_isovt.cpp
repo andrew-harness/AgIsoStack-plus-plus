@@ -444,11 +444,24 @@ namespace isobus
 
 				case AttributeName::ViewportZoom:
 				{
-					// Table B.59 AID 7 is an IEEE 754 float carried as raw bits through the generic uint32.
+					// Table B.59 AID 7 is an IEEE 754 float carried as raw bits through the generic uint32,
+					// with the attribute range -32.0 to +32.0. An out-of-range or non-finite value is refused
+					// with the invalid-value error, symmetric with the Zoom Viewport sub-command's F.57
+					// validation (the carry-0061 discipline: attribute writes are validated like the command
+					// path). In-range non-positive values are accepted -- B.59's range literally permits them
+					// -- and the renderer composites those at 1:1. The negated-comparison form rejects NaN,
+					// which fails every ordered comparison.
 					float zoom = 1.0f;
 					std::memcpy(&zoom, &rawAttributeData, sizeof(float));
-					set_viewport_zoom(zoom);
-					retVal = true;
+					if (!(zoom >= -32.0f) || !(zoom <= 32.0f))
+					{
+						returnedError = AttributeError::InvalidValue;
+					}
+					else
+					{
+						set_viewport_zoom(zoom);
+						retVal = true;
+					}
 				}
 				break;
 

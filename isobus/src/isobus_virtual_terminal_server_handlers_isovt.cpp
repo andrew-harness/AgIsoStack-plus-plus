@@ -1068,8 +1068,11 @@ namespace isobus
 		// Bound each sub-command's parameters against the received length so the painter cannot read past the
 		// data. Sub-commands 8-13 are the drawing primitives (fixed 4-byte for 8-11; variable for 12 Draw
 		// Polygon and 13 Draw Text, whose declared point-count / string-length byte sets the length). Sub-
-		// commands 14-20 are not executed in this slice; the painter returns NotExecuted and reads no
-		// parameters, so they need no bound here.
+		// commands 14-17 are the viewport ops: 14 Pan Viewport, 15 Zoom Viewport and 17 Change Viewport Size
+		// are fixed 4-byte; 16 Pan and Zoom Viewport is a fixed 8-byte block (bytes 5-12) that exceeds one
+		// frame, so it arrives TP-reassembled and the same single length check below bounds it -- there is no
+		// "variable" handling for it, only a larger fixed length. Sub-commands 18-20 are not executed in this
+		// slice; the painter returns NotExecuted and reads no parameters, so they need no bound here.
 		std::size_t requiredParameterBytes = 0;
 		switch (static_cast<GraphicsContextSubCommandID>(subCommand))
 		{
@@ -1080,7 +1083,14 @@ namespace isobus
 			case GraphicsContextSubCommandID::DrawLine: // F.56 bytes 5-8: end X, Y offset (signed)
 			case GraphicsContextSubCommandID::DrawRectangle: // F.56 bytes 5-8: width, height
 			case GraphicsContextSubCommandID::DrawClosedEllipse: // F.56 bytes 5-8: width, height
+			case GraphicsContextSubCommandID::PanViewport: // F.56 bytes 5-8: Viewport X, Y attributes (signed)
+			case GraphicsContextSubCommandID::ZoomViewport: // F.56 bytes 5-8: zoom value (float)
+			case GraphicsContextSubCommandID::ChangeViewportSize: // F.56 bytes 5-8: new width, height
 				requiredParameterBytes = 4;
+				break;
+
+			case GraphicsContextSubCommandID::PanAndZoomViewport: // F.56 bytes 5-12: Viewport X, Y (signed) + zoom (float)
+				requiredParameterBytes = 8;
 				break;
 
 			case GraphicsContextSubCommandID::SetForegroundColour: // F.56 byte 5: colour
