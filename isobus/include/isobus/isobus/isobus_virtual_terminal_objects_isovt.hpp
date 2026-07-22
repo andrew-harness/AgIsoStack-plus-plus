@@ -519,6 +519,20 @@ namespace isobus
 		std::uint8_t transparencyColour = 0; ///< Transparency colour palette index (AID 17)
 		std::vector<std::uint8_t> canvas; ///< canvasWidth*canvasHeight colour indices, row-major
 	};
+
+	/// @brief Writes one pixel into a Picture Graphic's decoded raster.
+	/// @details The raster is one colour-table index per pixel, row-major, actualWidth*actualHeight bytes
+	/// (every stored format is expanded to one byte per pixel at parse). This is the runtime raster-mutation
+	/// seam the Graphics Context Copy-to-Picture-Graphic sub-commands need (ISO 11783-6 F.56 sub-commands 19
+	/// and 20 write the canvas / viewport into a Picture Graphic). A coordinate outside the picture's actual
+	/// dimensions, or one past the end of a raster shorter than its declared dimensions, is ignored. Kept a
+	/// free function in this isovt-owned TU rather than a PictureGraphic member (ADR-0008): it adds no line to
+	/// the upstream object files.
+	/// @param[in,out] picture The Picture Graphic whose raster is written
+	/// @param[in] x The pixel X coordinate
+	/// @param[in] y The pixel Y coordinate
+	/// @param[in] colourIndex The colour-table index to store
+	void picture_graphic_set_pixel(PictureGraphic &picture, std::int32_t x, std::int32_t y, std::uint8_t colourIndex);
 } // namespace isobus
 
 #endif // ISOBUS_VIRTUAL_TERMINAL_OBJECTS_ISOVT_HPP

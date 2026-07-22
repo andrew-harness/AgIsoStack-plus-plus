@@ -1071,8 +1071,9 @@ namespace isobus
 		// commands 14-17 are the viewport ops: 14 Pan Viewport, 15 Zoom Viewport and 17 Change Viewport Size
 		// are fixed 4-byte; 16 Pan and Zoom Viewport is a fixed 8-byte block (bytes 5-12) that exceeds one
 		// frame, so it arrives TP-reassembled and the same single length check below bounds it -- there is no
-		// "variable" handling for it, only a larger fixed length. Sub-commands 18-20 are not executed in this
-		// slice; the painter returns NotExecuted and reads no parameters, so they need no bound here.
+		// "variable" handling for it, only a larger fixed length. Sub-commands 18-20 are the cross-object
+		// commands (18 Draw VT Object, 19 Copy Canvas to Picture Graphic, 20 Copy Viewport to Picture
+		// Graphic); each carries one 2-byte object ID in bytes 5-6 (F.56 Table F.1).
 		std::size_t requiredParameterBytes = 0;
 		switch (static_cast<GraphicsContextSubCommandID>(subCommand))
 		{
@@ -1101,6 +1102,9 @@ namespace isobus
 			case GraphicsContextSubCommandID::SetLineAttributesObjectID: // F.56 bytes 5-6: object ID
 			case GraphicsContextSubCommandID::SetFillAttributesObjectID: // F.56 bytes 5-6: object ID
 			case GraphicsContextSubCommandID::SetFontAttributesObjectID: // F.56 bytes 5-6: object ID
+			case GraphicsContextSubCommandID::DrawVTObject: // F.56 bytes 5-6: object ID of the object to draw
+			case GraphicsContextSubCommandID::CopyCanvasToPictureGraphic: // F.56 bytes 5-6: Picture Graphic object ID
+			case GraphicsContextSubCommandID::CopyViewportToPictureGraphic: // F.56 bytes 5-6: Picture Graphic object ID
 				requiredParameterBytes = 2;
 				break;
 

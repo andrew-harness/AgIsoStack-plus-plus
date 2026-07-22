@@ -953,4 +953,25 @@ namespace isobus
 		std::sort(labelledObjectIDs.begin(), labelledObjectIDs.end());
 		return (labelledObjectIDs.end() != std::adjacent_find(labelledObjectIDs.begin(), labelledObjectIDs.end()));
 	}
+
+	void picture_graphic_set_pixel(PictureGraphic &picture, std::int32_t x, std::int32_t y, std::uint8_t colourIndex)
+	{
+		const std::int32_t width = static_cast<std::int32_t>(picture.get_actual_width());
+		const std::int32_t height = static_cast<std::int32_t>(picture.get_actual_height());
+		if ((x < 0) || (y < 0) || (x >= width) || (y >= height))
+		{
+			return;
+		}
+
+		// The raster is expanded to one index per pixel at parse (add_raw_data caps growth at
+		// actualWidth*actualHeight), so the linear index is y*width + x. A raster shorter than its declared
+		// dimensions (a pool that under-supplied data) is written only where the index is in range.
+		std::vector<std::uint8_t> &raster = picture.get_raw_data();
+		const std::size_t index = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width)) +
+		  static_cast<std::size_t>(x);
+		if (index < raster.size())
+		{
+			raster[index] = colourIndex;
+		}
+	}
 } // namespace isobus
