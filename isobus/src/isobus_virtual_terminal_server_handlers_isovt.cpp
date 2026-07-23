@@ -63,6 +63,36 @@ namespace isobus
 		return static_cast<std::uint16_t>(lowByte | static_cast<std::uint16_t>(highByte << 8));
 	}
 
+	void VirtualTerminalServer::execute_operator_event_macros(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> workingSet, std::uint16_t objectID, EventID event)
+	{
+		if (nullptr == workingSet)
+		{
+			return;
+		}
+
+		// The per-command macro execution budget is reset at the top of each bus command in
+		// process_rx_message when no drain is active. An operator event enters here off the CAN
+		// thread's input dispatch rather than through that path, so it resets the budget itself: the
+		// press or release is a fresh trigger and gets its own 4.6.11.4 allotment. The depth guard
+		// keeps this from disturbing a drain already in flight (an operator event never arrives during
+		// one, but the invariant is stated where it is relied on).
+		if (0 == macroExecutionDepth)
+		{
+			macroExecutionsThisCommand = 0;
+			macroExecutionBudgetExhausted = false;
+		}
+
+		auto object = workingSet->get_object_by_id(objectID);
+		if (nullptr != object)
+		{
+			// process_macro enqueues this object's references whose event matches, in list order, and
+			// drains -- so operator-event macros run through the same FIFO queue, budget and
+			// 4.6.11.4 f) response suppression as command-triggered ones. The object's own type is the
+			// type guard, so a Key fires its Key macros and a Button its Button macros.
+			process_macro(object, event, object->get_object_type(), workingSet);
+		}
+	}
+
 	bool VirtualTerminalServer::handle_get_supported_objects_message(const CANMessage &message)
 	{
 		bool retVal = false;

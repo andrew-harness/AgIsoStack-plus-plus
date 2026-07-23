@@ -202,6 +202,22 @@ namespace isobus
 		/// @param[in] workingset The working set to execute the macro on
 		void process_macro(std::shared_ptr<isobus::VTObject> object, isobus::EventID macroEvent, isobus::VirtualTerminalObjectType targetObjectType, std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingset);
 
+		/// @brief Fires the macros an operator event triggers on a Key or Button object (ISO 11783-6
+		/// 4.6.11; Table A.3 events OnKeyPress = 24 "A Soft Key or Button is pressed" and
+		/// OnKeyRelease = 25 "A Soft Key or Button is released"). The VT owns this trigger: the client
+		/// receives the Soft Key / Button Activation message but never handles the pool's own macros,
+		/// so a display that dispatches operator presses must call this to run them. It resolves the
+		/// object by ID in the working set and routes its matching macro references through
+		/// process_macro -- the same FIFO queue, per-command execution budget and 4.6.11.4 f) response
+		/// suppression the command-triggered path uses. The operator event is a fresh trigger like a
+		/// bus command, so the per-command execution budget is reset for it (mirroring
+		/// process_rx_message) unless a macro drain is already in flight. CAN thread only, like the
+		/// activation send path; a no-op if the working set is null or the object does not exist.
+		/// @param[in] workingSet The working set the activated object belongs to
+		/// @param[in] objectID The object ID of the activated Key or Button
+		/// @param[in] event The operator event that occurred (OnKeyPress or OnKeyRelease)
+		void execute_operator_event_macros(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> workingSet, std::uint16_t objectID, isobus::EventID event);
+
 		// ----------- Mandatory Functions you must implement -----------------------
 
 		/// @brief This function is called when the client wants to know if the server has enough memory to store the object pool.
