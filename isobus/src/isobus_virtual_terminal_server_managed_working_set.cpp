@@ -298,17 +298,25 @@ namespace isobus
 			return 0.0f;
 		}
 
-		// if IOP transfer is not completed check if there is an ongoing IOP transfer to us
-		auto sessions = CANNetworkManager::CANNetwork.get_active_transport_protocol_sessions(0);
 		auto currentTransferredIopSize = transferredIopSize;
-		for (const auto &session : sessions)
+
+		// if IOP transfer is not completed check if there is an ongoing IOP transfer to us on this
+		// working set's CAN channel (the VT need not be on channel index 0), covering both TP and
+		// ETP sessions since get_active_transport_protocol_sessions returns both. A working set with
+		// no associated control function has no channel to scan and no in-flight bytes to add.
+		auto controlFunction = get_control_function();
+		if (nullptr != controlFunction)
 		{
-			if (session->get_source()->get_address() == get_control_function()->get_address() &&
-			    (static_cast<std::uint32_t>(CANLibParameterGroupNumber::ECUtoVirtualTerminal) == session->get_parameter_group_number()) &&
-			    (session->get_data().size() >= 1) &&
-			    (session->get_data().get_byte(0) == 0x11)) // ObjectPoolTransferMessage
+			auto sessions = CANNetworkManager::CANNetwork.get_active_transport_protocol_sessions(controlFunction->get_can_port());
+			for (const auto &session : sessions)
 			{
-				currentTransferredIopSize += session->get_total_bytes_transferred();
+				if (session->get_source()->get_address() == controlFunction->get_address() &&
+				    (static_cast<std::uint32_t>(CANLibParameterGroupNumber::ECUtoVirtualTerminal) == session->get_parameter_group_number()) &&
+				    (session->get_data().size() >= 1) &&
+				    (session->get_data().get_byte(0) == 0x11)) // ObjectPoolTransferMessage
+				{
+					currentTransferredIopSize += session->get_total_bytes_transferred();
+				}
 			}
 		}
 
@@ -396,7 +404,15 @@ namespace isobus
 
 	bool VirtualTerminalServerManagedWorkingSet::is_object_pool_transfer_in_progress() const
 	{
-		return iop_load_percentage() != 0.0f;
+		// A transfer is in progress only before the parse worker starts: once it runs, every IOP
+		// byte is already here and iop_load_percentage() reports 100 for the rest of the pool's
+		// life. Until then, a transfer is under way while some bytes have arrived but not yet all.
+		if (ObjectPoolProcessingThreadState::None != processingState)
+		{
+			return false;
+		}
+		const float percentage = iop_load_percentage();
+		return (percentage > 0.0f) && (percentage < 100.0f);
 	}
 
 } // namespace isobus
