@@ -2,7 +2,9 @@
 /// @file isobus_virtual_terminal_objects_isovt.cpp
 ///
 /// @brief Implements the fork's added VT object pool object classes: the Animation object (ISO
-/// 11783-6 Table B.72) and the Object Label Reference List object (Table B.64).
+/// 11783-6 Table B.72) and the Object Label Reference List object (Table B.64), plus the VT version 6
+/// Colour Palette (B.73), Graphic Data (B.74), Working Set Special Controls (B.78) and Scaled Graphic
+/// (B.76) objects.
 ///
 /// This translation unit is isovt-owned and has no upstream counterpart. Per ADR-0008, the fork's
 /// added VTObject implementations live here rather than interleaved in
@@ -952,6 +954,475 @@ namespace isobus
 		}
 		std::sort(labelledObjectIDs.begin(), labelledObjectIDs.end());
 		return (labelledObjectIDs.end() != std::adjacent_find(labelledObjectIDs.begin(), labelledObjectIDs.end()));
+	}
+
+	VirtualTerminalObjectType ColourPalette::get_object_type() const
+	{
+		return VirtualTerminalObjectType::ColourPalette;
+	}
+
+	std::uint32_t ColourPalette::get_minumum_object_length() const
+	{
+		return MIN_OBJECT_LENGTH;
+	}
+
+	bool ColourPalette::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const
+	{
+		// Table B.73 declares no children and no macro list, and the parse already bounds the entry count
+		// to 256. The palette stands alone, so validity here is just a present object ID.
+		return (NULL_OBJECT_ID != objectID);
+	}
+
+	bool ColourPalette::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &returnedError)
+	{
+		bool retVal = false;
+
+		if (static_cast<std::uint8_t>(AttributeName::Options) == attributeID)
+		{
+			// Table B.73: Options is a writable attribute (Change Attribute allowed), but every bit is
+			// reserved and sent as zero. The value is stored so it round-trips.
+			set_options(static_cast<std::uint8_t>(rawAttributeData));
+			retVal = true;
+		}
+		else
+		{
+			// Type [0] is read-only; any other ID does not exist on this object.
+			returnedError = AttributeError::InvalidAttributeID;
+		}
+		return retVal;
+	}
+
+	bool ColourPalette::get_attribute(std::uint8_t attributeID, std::uint32_t &returnedAttributeData) const
+	{
+		bool retVal = false;
+
+		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
+		{
+			switch (static_cast<AttributeName>(attributeID))
+			{
+				case AttributeName::Type:
+				{
+					returnedAttributeData = static_cast<std::uint8_t>(get_object_type());
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::Options:
+				{
+					returnedAttributeData = optionsBitfield;
+					retVal = true;
+				}
+				break;
+
+				default:
+				{
+					// Do nothing, return false
+				}
+				break;
+			}
+		}
+		return retVal;
+	}
+
+	std::uint8_t ColourPalette::get_options() const
+	{
+		return optionsBitfield;
+	}
+
+	void ColourPalette::set_options(std::uint8_t value)
+	{
+		optionsBitfield = value;
+	}
+
+	void ColourPalette::add_colour(std::uint8_t red, std::uint8_t green, std::uint8_t blue, std::uint8_t alpha)
+	{
+		colours.push_back({ red, green, blue, alpha });
+	}
+
+	std::uint16_t ColourPalette::get_number_of_colours() const
+	{
+		return static_cast<std::uint16_t>(colours.size());
+	}
+
+	ColourPalette::Colour ColourPalette::get_colour(std::uint16_t index) const
+	{
+		if (index < colours.size())
+		{
+			return colours[index];
+		}
+		return { 0, 0, 0, 0 };
+	}
+
+	VirtualTerminalObjectType GraphicData::get_object_type() const
+	{
+		return VirtualTerminalObjectType::GraphicData;
+	}
+
+	std::uint32_t GraphicData::get_minumum_object_length() const
+	{
+		return MIN_OBJECT_LENGTH;
+	}
+
+	bool GraphicData::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const
+	{
+		// Table B.74 declares no children and no macro list, and the parse already rejects a non-PNG
+		// format. The raw bytes are self-contained, so validity here is just a present object ID.
+		return (NULL_OBJECT_ID != objectID);
+	}
+
+	bool GraphicData::set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &returnedError)
+	{
+		// Table B.74 allows no commands, so every attribute (Type [0], Format [1]) is read-only.
+		returnedError = AttributeError::InvalidAttributeID;
+		return false;
+	}
+
+	bool GraphicData::get_attribute(std::uint8_t attributeID, std::uint32_t &returnedAttributeData) const
+	{
+		bool retVal = false;
+
+		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
+		{
+			switch (static_cast<AttributeName>(attributeID))
+			{
+				case AttributeName::Type:
+				{
+					returnedAttributeData = static_cast<std::uint8_t>(get_object_type());
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::Format:
+				{
+					returnedAttributeData = static_cast<std::uint8_t>(format);
+					retVal = true;
+				}
+				break;
+
+				default:
+				{
+					// Do nothing, return false
+				}
+				break;
+			}
+		}
+		return retVal;
+	}
+
+	GraphicData::Format GraphicData::get_format() const
+	{
+		return format;
+	}
+
+	void GraphicData::set_format(Format value)
+	{
+		format = value;
+	}
+
+	const std::vector<std::uint8_t> &GraphicData::get_raw_data() const
+	{
+		return rawData;
+	}
+
+	void GraphicData::set_raw_data(const std::uint8_t *data, std::uint32_t length)
+	{
+		if ((nullptr != data) && (0u != length))
+		{
+			rawData.assign(data, data + length);
+		}
+		else
+		{
+			rawData.clear();
+		}
+	}
+
+	VirtualTerminalObjectType WorkingSetSpecialControls::get_object_type() const
+	{
+		return VirtualTerminalObjectType::WorkingSetSpecialControls;
+	}
+
+	std::uint32_t WorkingSetSpecialControls::get_minumum_object_length() const
+	{
+		return MIN_OBJECT_LENGTH;
+	}
+
+	bool WorkingSetSpecialControls::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const
+	{
+		// Table B.78 declares no children and no macro list. The referenced Colour Map / Colour Palette
+		// objects are consulted when the pool is first rendered, which validates them then, so validity
+		// here is just a present object ID.
+		return (NULL_OBJECT_ID != objectID);
+	}
+
+	bool WorkingSetSpecialControls::set_attribute(std::uint8_t, std::uint32_t, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &returnedError)
+	{
+		// Table B.78 allows only the Get Attribute Value message, so every attribute is read-only.
+		returnedError = AttributeError::InvalidAttributeID;
+		return false;
+	}
+
+	bool WorkingSetSpecialControls::get_attribute(std::uint8_t attributeID, std::uint32_t &returnedAttributeData) const
+	{
+		bool retVal = false;
+
+		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
+		{
+			switch (static_cast<AttributeName>(attributeID))
+			{
+				case AttributeName::Type:
+				{
+					returnedAttributeData = static_cast<std::uint8_t>(get_object_type());
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::NumberOfBytesToFollow:
+				{
+					returnedAttributeData = numberOfBytesToFollow;
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ColourMapObjectID:
+				{
+					returnedAttributeData = colourMapObjectID;
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ColourPaletteObjectID:
+				{
+					returnedAttributeData = colourPaletteObjectID;
+					retVal = true;
+				}
+				break;
+
+				default:
+				{
+					// Do nothing, return false
+				}
+				break;
+			}
+		}
+		return retVal;
+	}
+
+	std::uint16_t WorkingSetSpecialControls::get_number_of_bytes_to_follow() const
+	{
+		return numberOfBytesToFollow;
+	}
+
+	void WorkingSetSpecialControls::set_number_of_bytes_to_follow(std::uint16_t value)
+	{
+		numberOfBytesToFollow = value;
+	}
+
+	std::uint16_t WorkingSetSpecialControls::get_colour_map_object_id() const
+	{
+		return colourMapObjectID;
+	}
+
+	void WorkingSetSpecialControls::set_colour_map_object_id(std::uint16_t value)
+	{
+		colourMapObjectID = value;
+	}
+
+	std::uint16_t WorkingSetSpecialControls::get_colour_palette_object_id() const
+	{
+		return colourPaletteObjectID;
+	}
+
+	void WorkingSetSpecialControls::set_colour_palette_object_id(std::uint16_t value)
+	{
+		colourPaletteObjectID = value;
+	}
+
+	void WorkingSetSpecialControls::add_language_pair(std::uint8_t languageHigh, std::uint8_t languageLow, std::uint8_t countryHigh, std::uint8_t countryLow)
+	{
+		LanguagePair pair;
+		pair.languageCode = { static_cast<char>(languageHigh), static_cast<char>(languageLow) };
+		pair.countryCode = { static_cast<char>(countryHigh), static_cast<char>(countryLow) };
+		languagePairs.push_back(pair);
+	}
+
+	std::uint8_t WorkingSetSpecialControls::get_number_of_language_pairs() const
+	{
+		return static_cast<std::uint8_t>(languagePairs.size());
+	}
+
+	WorkingSetSpecialControls::LanguagePair WorkingSetSpecialControls::get_language_pair(std::uint8_t index) const
+	{
+		if (index < languagePairs.size())
+		{
+			return languagePairs[index];
+		}
+		return { { ' ', ' ' }, { ' ', ' ' } };
+	}
+
+	VirtualTerminalObjectType ScaledGraphic::get_object_type() const
+	{
+		return VirtualTerminalObjectType::ScaledGraphic;
+	}
+
+	std::uint32_t ScaledGraphic::get_minumum_object_length() const
+	{
+		return MIN_OBJECT_LENGTH;
+	}
+
+	bool ScaledGraphic::get_is_valid(const std::map<std::uint16_t, std::shared_ptr<VTObject>> &) const
+	{
+		// Table B.76 declares no children beyond the macro list. The Value attribute references a graphic
+		// object (Graphic Data / Picture Graphic / Object Pointer / NULL); that reference is resolved and
+		// validated when the object is rendered, so validity here is just a present object ID.
+		return (NULL_OBJECT_ID != objectID);
+	}
+
+	bool ScaledGraphic::set_attribute(std::uint8_t attributeID, std::uint32_t rawAttributeData, const std::map<std::uint16_t, std::shared_ptr<VTObject>> &, AttributeError &returnedError)
+	{
+		bool retVal = false;
+
+		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
+		{
+			switch (static_cast<AttributeName>(attributeID))
+			{
+				case AttributeName::Width:
+				{
+					set_width(static_cast<std::uint16_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::Height:
+				{
+					set_height(static_cast<std::uint16_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ScaleType:
+				{
+					set_scale_type(static_cast<std::uint8_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::Options:
+				{
+					set_options(static_cast<std::uint8_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::Value:
+				{
+					set_value(static_cast<std::uint16_t>(rawAttributeData));
+					retVal = true;
+				}
+				break;
+
+				default:
+				{
+					// Type [0] is read-only.
+					returnedError = AttributeError::InvalidAttributeID;
+				}
+				break;
+			}
+		}
+		else
+		{
+			returnedError = AttributeError::InvalidAttributeID;
+		}
+		return retVal;
+	}
+
+	bool ScaledGraphic::get_attribute(std::uint8_t attributeID, std::uint32_t &returnedAttributeData) const
+	{
+		bool retVal = false;
+
+		if (attributeID < static_cast<std::uint8_t>(AttributeName::NumberOfAttributes))
+		{
+			switch (static_cast<AttributeName>(attributeID))
+			{
+				case AttributeName::Type:
+				{
+					returnedAttributeData = static_cast<std::uint8_t>(get_object_type());
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::Width:
+				{
+					returnedAttributeData = get_width();
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::Height:
+				{
+					returnedAttributeData = get_height();
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::ScaleType:
+				{
+					returnedAttributeData = scaleTypeByte;
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::Options:
+				{
+					returnedAttributeData = optionsBitfield;
+					retVal = true;
+				}
+				break;
+
+				case AttributeName::Value:
+				{
+					returnedAttributeData = value;
+					retVal = true;
+				}
+				break;
+
+				default:
+				{
+					// Do nothing, return false
+				}
+				break;
+			}
+		}
+		return retVal;
+	}
+
+	std::uint8_t ScaledGraphic::get_scale_type() const
+	{
+		return scaleTypeByte;
+	}
+
+	void ScaledGraphic::set_scale_type(std::uint8_t value)
+	{
+		scaleTypeByte = value;
+	}
+
+	std::uint8_t ScaledGraphic::get_options() const
+	{
+		return optionsBitfield;
+	}
+
+	void ScaledGraphic::set_options(std::uint8_t value)
+	{
+		optionsBitfield = value;
+	}
+
+	std::uint16_t ScaledGraphic::get_value() const
+	{
+		return value;
+	}
+
+	void ScaledGraphic::set_value(std::uint16_t inputValue)
+	{
+		value = inputValue;
 	}
 
 	void picture_graphic_set_pixel(PictureGraphic &picture, std::int32_t x, std::int32_t y, std::uint8_t colourIndex)

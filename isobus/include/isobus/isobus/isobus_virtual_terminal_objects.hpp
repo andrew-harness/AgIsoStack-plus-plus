@@ -50,7 +50,9 @@ namespace isobus
 		GraphicsContext = 36, ///< Used to output a graphics context.
 		Animation = 44, ///< The Animation object is used to display simple animations
 		PictureGraphic = 20, ///< Used to output a picture graphic (bitmap).
+		ColourPalette = 45, ///< Used to replace the VT standard colour palette in use for a working set
 		GraphicData = 46, ///< Used to define the data for a graphic image
+		WorkingSetSpecialControls = 47, ///< Used to provide special controls over colour maps and palettes
 		ScaledGraphic = 48, ///< Used to display a scaled representation of a graphic object
 		NumberVariable = 21, ///< Used to store a 32-bit unsigned integer value.
 		StringVariable = 22, ///< Used to store a fixed length string value.

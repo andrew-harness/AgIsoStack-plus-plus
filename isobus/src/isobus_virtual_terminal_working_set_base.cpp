@@ -2669,6 +2669,213 @@ namespace isobus
 				}
 				break;
 
+				case VirtualTerminalObjectType::ColourPalette:
+				{
+					auto tempObject = std::make_shared<ColourPalette>();
+
+					if (iopLength >= tempObject->get_minumum_object_length())
+					{
+						// Table B.73: id [1-2], type [3], options [4], number of ARGB values [5-6], then
+						// four bytes per entry in little-endian B, G, R, A order.
+						const std::uint16_t numberOfColours = get_little_endian_uint16(iopData, 4);
+
+						if (numberOfColours <= 256)
+						{
+							tempObject->set_id(decodedID);
+							tempObject->set_options(iopData[3]);
+							iopData += 6;
+							iopLength -= 6;
+
+							const std::uint32_t colourBytes = static_cast<std::uint32_t>(numberOfColours) * 4u;
+							if (iopLength >= colourBytes)
+							{
+								for (std::uint_fast16_t i = 0; i < numberOfColours; i++)
+								{
+									tempObject->add_colour(iopData[2], iopData[1], iopData[0], iopData[3]);
+									iopData += 4;
+									iopLength -= 4;
+								}
+								retVal = true;
+							}
+							else
+							{
+								LOG_ERROR("[WS]: Not enough IOP data to parse colour palette entries for object " + isobus::to_string(static_cast<int>(decodedID)));
+							}
+						}
+						else
+						{
+							LOG_ERROR("[WS]: Colour palette object " + isobus::to_string(static_cast<int>(decodedID)) + " declares more than 256 ARGB values");
+						}
+					}
+					else
+					{
+						LOG_ERROR("[WS]: Not enough IOP data to parse colour palette object");
+					}
+
+					if (retVal)
+					{
+						retVal = add_or_replace_object(tempObject);
+					}
+				}
+				break;
+
+				case VirtualTerminalObjectType::GraphicData:
+				{
+					auto tempObject = std::make_shared<GraphicData>();
+
+					if (iopLength >= tempObject->get_minumum_object_length())
+					{
+						// Table B.74: id [1-2], type [3], format [4], 4-byte raw-data length [5-8], then the
+						// raw bytes. Format 0 is PNG and the only value defined; a non-zero format is a parse
+						// error (the object carries content this VT cannot interpret).
+						const std::uint8_t format = iopData[3];
+
+						if (0 == format)
+						{
+							const std::uint32_t numberOfBytes = get_little_endian_uint32(iopData, 4);
+							tempObject->set_id(decodedID);
+							tempObject->set_format(GraphicData::Format::PNG);
+							iopData += 8;
+							iopLength -= 8;
+
+							if (iopLength >= numberOfBytes)
+							{
+								tempObject->set_raw_data(iopData, numberOfBytes);
+								iopData += numberOfBytes;
+								iopLength -= numberOfBytes;
+								retVal = true;
+							}
+							else
+							{
+								LOG_ERROR("[WS]: Not enough IOP data to parse graphic data raw bytes for object " + isobus::to_string(static_cast<int>(decodedID)));
+							}
+						}
+						else
+						{
+							LOG_ERROR("[WS]: Graphic data object " + isobus::to_string(static_cast<int>(decodedID)) + " has a non-PNG format, which this VT cannot interpret");
+						}
+					}
+					else
+					{
+						LOG_ERROR("[WS]: Not enough IOP data to parse graphic data object");
+					}
+
+					if (retVal)
+					{
+						retVal = add_or_replace_object(tempObject);
+					}
+				}
+				break;
+
+				case VirtualTerminalObjectType::WorkingSetSpecialControls:
+				{
+					auto tempObject = std::make_shared<WorkingSetSpecialControls>();
+
+					if (iopLength >= tempObject->get_minumum_object_length())
+					{
+						// Table B.78: id [1-2], type [3], number of bytes to follow [4-5], then a body of
+						// exactly that many bytes: colour map object ID [6-7], colour palette object ID [8-9],
+						// number of language pairs [10], then four bytes per pair. The count makes the record
+						// extensible; any bytes beyond the language list are a future extension and are skipped.
+						const std::uint16_t numberOfBytesToFollow = get_little_endian_uint16(iopData, 3);
+
+						if ((numberOfBytesToFollow >= 5) &&
+						    (iopLength >= (static_cast<std::uint32_t>(numberOfBytesToFollow) + 5u)))
+						{
+							const std::uint8_t numberOfLanguages = iopData[9];
+
+							if ((5u + (static_cast<std::uint32_t>(numberOfLanguages) * 4u)) <= numberOfBytesToFollow)
+							{
+								tempObject->set_id(decodedID);
+								tempObject->set_number_of_bytes_to_follow(numberOfBytesToFollow);
+								tempObject->set_colour_map_object_id(get_little_endian_uint16(iopData, 5));
+								tempObject->set_colour_palette_object_id(get_little_endian_uint16(iopData, 7));
+
+								const std::uint8_t *languageData = iopData + 10;
+								for (std::uint_fast8_t i = 0; i < numberOfLanguages; i++)
+								{
+									tempObject->add_language_pair(languageData[0], languageData[1], languageData[2], languageData[3]);
+									languageData += 4;
+								}
+
+								// Advance past the whole object: the 5-byte header (id, type, count) plus the
+								// declared body, so any trailing extension bytes are skipped (B.29).
+								iopData += (5u + numberOfBytesToFollow);
+								iopLength -= (5u + numberOfBytesToFollow);
+								retVal = true;
+							}
+							else
+							{
+								LOG_ERROR("[WS]: Working set special controls object " + isobus::to_string(static_cast<int>(decodedID)) + " language list overruns its declared body");
+							}
+						}
+						else
+						{
+							LOG_ERROR("[WS]: Not enough IOP data to parse working set special controls object " + isobus::to_string(static_cast<int>(decodedID)));
+						}
+					}
+					else
+					{
+						LOG_ERROR("[WS]: Not enough IOP data to parse working set special controls object");
+					}
+
+					if (retVal)
+					{
+						// B.29: an object pool contains zero or one Working Set Special Controls object. A
+						// second one, carrying a different ID, faults the pool. The scan runs over the staging
+						// tree, mirroring the Object Label Reference List uniqueness check above.
+						for (const auto &existingObject : vtObjectTree)
+						{
+							if ((nullptr != existingObject.second) &&
+							    (VirtualTerminalObjectType::WorkingSetSpecialControls == existingObject.second->get_object_type()) &&
+							    (decodedID != existingObject.first))
+							{
+								LOG_ERROR("[WS]: An object pool may contain only one working set special controls object, but object " + isobus::to_string(static_cast<int>(decodedID)) + " is a second one");
+								retVal = false;
+								break;
+							}
+						}
+					}
+
+					if (retVal)
+					{
+						retVal = add_or_replace_object(tempObject);
+					}
+				}
+				break;
+
+				case VirtualTerminalObjectType::ScaledGraphic:
+				{
+					auto tempObject = std::make_shared<ScaledGraphic>();
+
+					if (iopLength >= tempObject->get_minumum_object_length())
+					{
+						// Table B.76: id [1-2], type [3], width [4-5], height [6-7], scale type [8], options
+						// [9], value [10-11], number of macros [12], then the macro list.
+						tempObject->set_id(decodedID);
+						tempObject->set_width(get_little_endian_uint16(iopData, 3));
+						tempObject->set_height(get_little_endian_uint16(iopData, 5));
+						tempObject->set_scale_type(iopData[7]);
+						tempObject->set_options(iopData[8]);
+						tempObject->set_value(get_little_endian_uint16(iopData, 9));
+						const std::uint8_t numberOfMacrosToFollow = iopData[11];
+						iopData += 12;
+						iopLength -= 12;
+
+						retVal = parse_object_macro_reference(tempObject, numberOfMacrosToFollow, iopData, iopLength);
+					}
+					else
+					{
+						LOG_ERROR("[WS]: Not enough IOP data to parse scaled graphic object");
+					}
+
+					if (retVal)
+					{
+						retVal = add_or_replace_object(tempObject);
+					}
+				}
+				break;
+
 				default:
 				{
 					LOG_ERROR("[WS]: Unsupported Object (Type: %d)", decodedType);
