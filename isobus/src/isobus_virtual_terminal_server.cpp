@@ -1852,6 +1852,10 @@ namespace isobus
 										// the same value and moves nothing.
 										refresh_active_mask_status_fields();
 									}
+									// The retargeted soft-key column is presented by this command's own repaint:
+									// nothing else repaints on its behalf, and a macro-driven change has no follow-on
+									// client traffic (the Change Active Mask case makes the same guarantee).
+									dispatch_repaint(managedWorkingSet);
 									onChangeActiveSoftKeyMaskEventDispatcher.call(managedWorkingSet, dataOrAlarmMaskId, newSoftKeyMaskId);
 									process_macro(targetMask, EventID::OnChangeSoftKeyMask, VirtualTerminalObjectType::AlarmMask, managedWorkingSet);
 								}
@@ -1877,6 +1881,10 @@ namespace isobus
 										// the same value and moves nothing.
 										refresh_active_mask_status_fields();
 									}
+									// The retargeted soft-key column is presented by this command's own repaint:
+									// nothing else repaints on its behalf, and a macro-driven change has no follow-on
+									// client traffic (the Change Active Mask case makes the same guarantee).
+									dispatch_repaint(managedWorkingSet);
 									onChangeActiveSoftKeyMaskEventDispatcher.call(managedWorkingSet, dataOrAlarmMaskId, newSoftKeyMaskId);
 									process_macro(targetMask, EventID::OnChangeSoftKeyMask, VirtualTerminalObjectType::DataMask, managedWorkingSet);
 								}
