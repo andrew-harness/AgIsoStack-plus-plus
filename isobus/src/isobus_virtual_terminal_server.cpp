@@ -2443,6 +2443,10 @@ namespace isobus
 			}
 			break;
 
+			case Function::SelectActiveWorkingSet:
+				handle_select_active_working_set_command(message, managedWorkingSet);
+				break;
+
 			case Function::ButtonActivationMessage:
 			case Function::SoftKeyActivationMessage:
 			case Function::PointingEventMessage:

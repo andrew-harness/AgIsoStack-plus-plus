@@ -1132,6 +1132,22 @@ namespace isobus
 		/// @param[in] managedWorkingSet The working set that sent the command
 		void handle_change_object_label_command(const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
 
+		/// @brief Handles a Select Active Working Set command (0x90, ISO 11783-6:2018 F.64/F.65): the currently
+		/// active working set asks the VT to hand the screen to another working set named by NAME. The command
+		/// is nine data bytes and arrives reassembled from the transport protocol. Available at VT version 6 and
+		/// later only; below that the VT answers Unsupported VT Function.
+		/// @param[in] message The CAN message that was received (its bytes 2-9 carry the target WSM NAME)
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_select_active_working_set_command(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Sends a Select Active Working Set response (0x90, ISO 11783-6:2018 F.65) to the commanding
+		/// working set. Byte 2 carries the error codes (0 = the new working set was activated), bytes 3-8 are
+		/// reserved 0xFF.
+		/// @param[in] errorBitfield The F.65 error-code byte (0 on success)
+		/// @param[in] destination The commanding working set's control function
+		/// @returns true if the message was sent, otherwise false
+		bool send_select_active_working_set_response(std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const;
+
 		/// @brief Sends a response to a change background colour command
 		/// @param[in] objectID The object ID for the object to change
 		/// @param[in] errorBitfield An error bitfield

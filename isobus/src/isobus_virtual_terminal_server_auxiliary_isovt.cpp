@@ -111,7 +111,17 @@ namespace isobus
 		if ((message.get_data_length() >= 4) && (message.get_data_length() < 14))
 		{
 			const std::uint16_t functionObjectId = message.get_uint16_at(1);
-			const std::uint8_t errorCode = message.get_uint8_at(3);
+			std::uint8_t errorCode = message.get_uint8_at(3);
+
+			// ISO 11783-6:2018 J.7.6: byte 4 bit 1 meant "this function is already assigned to the same input"
+			// at VT version 5 and prior, but is reserved at VT version 6 and later and "shall not cause any
+			// change in behaviour". Strip it for a version-6 pair before any handler keys on the error code so
+			// the reserved bit cannot trigger a rollback; a version-5-or-prior pair keeps the byte unchanged.
+			if (is_version6_pair(managedWorkingSet))
+			{
+				errorCode &= static_cast<std::uint8_t>(~static_cast<std::uint8_t>(0x02u));
+			}
+
 			on_auxiliary_assignment_response_received(managedWorkingSet, functionObjectId, errorCode);
 		}
 	}

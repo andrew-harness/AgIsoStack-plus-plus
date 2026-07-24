@@ -848,6 +848,143 @@ namespace isobus
 		return retVal;
 	}
 
+	void VirtualTerminalServer::handle_select_active_working_set_command(const CANMessage &message, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet)
+	{
+		// ISO 11783-6:2018 F.64: the Select Active Working Set command is available in VT version 6 and
+		// later. To a lower-version VT the function code is unknown, so Annex C routes it to the Unsupported
+		// VT Function reply rather than an F.65 response (the Screen Capture 0xC6 precedent). This gates on
+		// the VT's own version, not the pair: F.65 is a function the VT either supports or does not.
+		if (get_version() < VTVersion::Version6)
+		{
+			send_unsupported_vt_function(static_cast<std::uint8_t>(Function::SelectActiveWorkingSet), message.get_source_control_function());
+			return;
+		}
+
+		// F.64's byte layout runs to byte 9 (the 8-byte NAME after the function code), so the reassembled
+		// message must carry at least nine data bytes before the NAME read below is defined -- the generic
+		// dispatch admits anything of one CAN frame or more, and F.64's own header line says "Data length:
+		// 8 bytes", so a client following that line literally sends a truncated NAME. Refused with F.65
+		// bit 7 (any other error); reading byte 9 of an 8-byte frame would throw on the CAN thread.
+		if (message.get_data_length() < 9)
+		{
+			send_select_active_working_set_response(get_bit(7), message.get_source_control_function());
+			return;
+		}
+
+		// F.65 byte 2 error codes, evaluated in order so a single set bit identifies the first failing
+		// condition. F.65: "If any of the Error Code bits are set, then the VT shall not select a new active
+		// Working Set" -- so the selection below runs only when every check passes.
+		std::uint8_t errorBitfield = 0;
+
+		if (managedWorkingSet != activeWorkingSet)
+		{
+			// F.64: "If the VT receives this command from a Working Set which is not the active Working Set
+			// then the VT shall ignore the request and set the appropriate Error Code in the response
+			// message." Bit 0 = command was not sent from the active WS. The response is still sent, to the
+			// commanding working set, but no selection change is made.
+			errorBitfield = get_bit(0);
+		}
+		else
+		{
+			// Bit 1 = the currently active mask is an Alarm Mask. The command comes from the active working
+			// set (bit 0 passed), so the currently active mask is that working set's active mask; an alarm on
+			// screen must not be handed away by a collaboration hand-off.
+			auto commandingMask = get_active_mask_object(managedWorkingSet);
+			const bool commandingMaskIsAlarm = (nullptr != commandingMask) &&
+			  (VirtualTerminalObjectType::AlarmMask == commandingMask->get_object_type());
+
+			if (commandingMaskIsAlarm)
+			{
+				errorBitfield = get_bit(1);
+			}
+			else
+			{
+				// F.64 bytes 2-9: the NAME of the Working Set Master to activate, little endian (the command
+				// is nine data bytes, reassembled from the transport protocol).
+				const std::uint64_t targetName = message.get_uint64_at(1);
+				std::shared_ptr<VirtualTerminalServerManagedWorkingSet> targetWorkingSet;
+
+				for (const auto &ws : managedWorkingSetList)
+				{
+					if ((nullptr != ws) &&
+					    (nullptr != ws->get_control_function()) &&
+					    (ws->get_control_function()->get_NAME().get_full_name() == targetName))
+					{
+						targetWorkingSet = ws;
+						break;
+					}
+				}
+
+				if (nullptr == targetWorkingSet)
+				{
+					// Bit 2 = the NAME in the command does not identify a Working Set Master.
+					errorBitfield = get_bit(2);
+				}
+				else if (nullptr == targetWorkingSet->get_working_set_object())
+				{
+					// Bit 3 = the identified WSM has no object pool on this VT. A managed working set exists
+					// from its first Working Set Maintenance message, before any pool is uploaded (and again
+					// after a pool is deleted), and in that state it resolves no Working Set object.
+					errorBitfield = get_bit(3);
+				}
+				else
+				{
+					// Bit 4 = the identified WSM's active mask attribute does not name a Data Mask. F.64: this
+					// is the check the Selectable attribute is exempt from -- a non-selectable working set can
+					// be activated by this command "provided the Object Id in the Active mask attribute of the
+					// target's Working Set object indicates a Data Mask" -- so selectability is deliberately
+					// not tested here.
+					auto targetMask = get_active_mask_object(targetWorkingSet);
+					const bool targetHasActiveDataMask = (nullptr != targetMask) &&
+					  (VirtualTerminalObjectType::DataMask == targetMask->get_object_type());
+
+					if (!targetHasActiveDataMask)
+					{
+						errorBitfield = get_bit(4);
+					}
+					else
+					{
+						// Every check passed: hand the screen to the target. The selection goes through the
+						// operator-selection tier of the arbitration -- F.64 is the active working set delegating
+						// the screen, closest in spirit to a clause 4.6.8 operator selection -- so it persists
+						// across later arbitrations exactly like an operator choice, and the alarm tier still
+						// outranks it (a 4.6.14 alarm cannot be suppressed by this command). set_operator_
+						// selected_working_set runs apply_active_working_set_arbitration, which flips the active
+						// working set, marks the VT Status changed, and closes the displaced set's open input.
+						set_operator_selected_working_set(targetWorkingSet);
+					}
+				}
+			}
+		}
+
+		// F.65 is sent to the commanding working set (the source), whether or not a selection was made.
+		send_select_active_working_set_response(errorBitfield, message.get_source_control_function());
+	}
+
+	bool VirtualTerminalServer::send_select_active_working_set_response(std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
+	{
+		bool retVal = false;
+
+		if (nullptr != destination)
+		{
+			const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
+				static_cast<std::uint8_t>(Function::SelectActiveWorkingSet),
+				errorBitfield,
+				0xFF,
+				0xFF,
+				0xFF,
+				0xFF,
+				0xFF,
+				0xFF
+			};
+
+			// send_response is the macro-suppression choke point: F.65 is "Allowed in a Macro: No", and a
+			// 0x90 replayed inside a macro (F.64 is "Allowed in a Macro: Yes") has its response withheld here.
+			retVal = send_response(buffer.data(), CAN_DATA_LENGTH, destination);
+		}
+		return retVal;
+	}
+
 	bool VirtualTerminalServer::send_select_colour_map_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::shared_ptr<ControlFunction> destination) const
 	{
 		bool retVal = false;
