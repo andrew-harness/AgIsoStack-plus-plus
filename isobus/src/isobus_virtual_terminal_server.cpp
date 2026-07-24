@@ -1231,6 +1231,12 @@ namespace isobus
 						// held it. The arbitration also refreshes the status' visible-mask fields (G.2 bytes
 						// 3-6), which report the ACTIVE working set's mask and the soft key mask it carries.
 						apply_active_working_set_arbitration();
+						// The new mask is presented by this command's own repaint: the arbitration above only
+						// repaints when the screen moves to a DIFFERENT working set, and a macro-driven mask
+						// change (a Table A.3 key event) has no follow-on client traffic whose repaints would
+						// refresh a stale frame. Routed through dispatch_repaint so an F.46 mask lock still
+						// withholds the refresh.
+						dispatch_repaint(managedWorkingSet);
 						onChangeActiveMaskEventDispatcher.call(managedWorkingSet, workingSetObjectId, newActiveMaskObjectId);
 						LOG_DEBUG("[VT Server]: Client %u changed active mask to object %u for working set object %u", managedWorkingSet->get_control_function()->get_address(), newActiveMaskObjectId, workingSetObjectId);
 					}
