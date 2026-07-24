@@ -413,7 +413,8 @@ namespace isobus
 		enum class WorkingSetLossReason : std::uint8_t
 		{
 			MaintenanceTimeout = 0, ///< ISO 11783-6 clause 4.6.9: no Working Set Maintenance message for over 3 s while its object pool was present
-			InvalidObjectPoolUpdate = 1 ///< ISO 11783-6 clause C.2.6: a runtime object pool update failed to parse, so the entire pool is deleted and the working set suspended
+			InvalidObjectPoolUpdate = 1, ///< ISO 11783-6 clause C.2.6: a runtime object pool update failed to parse, so the entire pool is deleted and the working set suspended
+			ActivationResponseTimeout = 2 ///< ISO 11783-6 H.1 (VT version 6): a required activation response was not received after three retries, treated as a 4.6.9 unexpected shutdown
 		};
 
 		/// @brief Returns the event dispatcher raised when a working set is torn down, carrying the lost
@@ -1442,6 +1443,66 @@ namespace isobus
 		/// @returns true if at least one working set was torn down, so the caller re-runs the arbitration
 		bool tear_down_lost_working_sets();
 
+		/// @brief Stamps a Transaction Number (TAN) into an activation message frame and records it as an
+		/// outstanding activation awaiting a response, for a VT-version-6 pair (ISO 11783-6 Annex H.1).
+		/// @details Annex H adds a TAN to the activation messages where response pairing is essential; for
+		/// a working set compatible with VT version 6 the response is required within 200 ms, and if none
+		/// arrives the VT retries and, failing that, treats the working set as unexpectedly shut down. Every
+		/// activation sender routes through this one choke point so the tracking is uniform. The TAN occupies
+		/// bits 7-4 of a message-specific byte with bits 3-0 fixed at 0xF (H.2/H.4/H.8/H.10 byte 8, H.12
+		/// byte 4); for a version-5-or-prior pair this returns false without touching the frame, so the frame
+		/// stays byte-identical to before Annex H tracking (the TAN byte remains reserved 0xFF). A new send
+		/// for a function code supersedes any prior outstanding entry for that same function with a fresh TAN,
+		/// realising H.1's current-value-not-stale rule. Const because it is called from the const activation
+		/// senders; it mutates only the mutable activation-tracker state.
+		/// @param[in] destination The working set master the activation is sent to
+		/// @param[in] functionCode The activation message's VT function (Table C.1), which selects the TAN byte
+		/// @param[in,out] frame The 8-byte activation frame; its TAN byte is overwritten when this returns true
+		/// @returns true if a TAN was stamped and the activation recorded (a version-6 pair), otherwise false
+		bool stamp_and_record_activation(std::shared_ptr<ControlFunction> destination, std::uint8_t functionCode, std::array<std::uint8_t, CAN_DATA_LENGTH> &frame) const;
+
+		/// @brief Pairs a received activation response with its outstanding activation by TAN and clears it
+		/// (ISO 11783-6 Annex H.1). A response whose TAN does not match the outstanding entry for that
+		/// function code is the answer to a frame a newer activation already superseded; it is logged at
+		/// debug and the outstanding entry is left in place. A no-op if the function is not TAN-tracked or
+		/// no activation is outstanding for it.
+		/// @param[in] workingSet The working set that sent the response
+		/// @param[in] functionCode The response's VT function (Table C.1)
+		/// @param[in] responseTan The TAN echoed in the response's TAN byte
+		void handle_activation_response(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet, std::uint8_t functionCode, std::uint8_t responseTan);
+
+		/// @brief Retries and times out outstanding activations (ISO 11783-6 Annex H.1), run from update()
+		/// on the CAN thread ahead of the loss-teardown pass. An activation with no response after 300 ms is
+		/// re-sent unchanged (same TAN), up to 3 times; after the third retry's 300 ms window also expires
+		/// with no response the working set's tracker is flagged timed-out, which the loss-teardown pass
+		/// reads to tear it down as a clause 4.6.9 unexpected shutdown. Only a version-6 pair ever has entries
+		/// here, so a version-5 working set is never retried or torn down by this path.
+		void update_activation_trackers();
+
+		/// @brief Returns whether a working set has exhausted its activation retries with no response, so the
+		/// loss-teardown pass should tear it down as a clause 4.6.9 unexpected shutdown (ISO 11783-6 H.1).
+		/// @param[in] workingSet The working set to check
+		/// @returns true if the working set's activation tracker has timed out, otherwise false
+		bool is_activation_response_timed_out(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet) const;
+
+		/// @brief Drops a working set's activation-tracker state. Called from the loss-teardown pass when a
+		/// working set is erased, so a later working set at the same address cannot inherit stale outstanding
+		/// activations.
+		/// @param[in] workingSet The working set whose tracker state is dropped
+		void clear_activation_tracker(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet);
+
+		/// @brief Maps an activation message's VT function to the zero-based index of its TAN byte
+		/// (ISO 11783-6 Annex H): Soft Key (0x00), Button (0x01), VT Select Input Object (0x03) and VT ESC
+		/// (0x04) carry the TAN in byte 8 (index 7); VT Change Numeric Value (0x05) in byte 4 (index 3).
+		/// @param[in] functionCode The activation message's VT function (Table C.1)
+		/// @returns The zero-based TAN byte index, or CAN_DATA_LENGTH if the function is not TAN-tracked in this phase
+		static std::size_t activation_tan_byte_offset(std::uint8_t functionCode);
+
+		/// @brief Finds the managed working set whose master control function is `destination`, or null.
+		/// @param[in] destination The control function to match against each managed working set's master
+		/// @returns The managed working set with that master, or an empty shared pointer if none matches
+		std::shared_ptr<VirtualTerminalServerManagedWorkingSet> find_managed_working_set_for(const std::shared_ptr<ControlFunction> &destination) const;
+
 		/// @brief Sends the list of objects that the server supports to a client, usually in
 		/// response to a "get supported objects" message, which is used by a client.
 		/// @param[in] destination The control function to send the message to
@@ -1557,6 +1618,28 @@ namespace isobus
 		static constexpr std::uint32_t MAX_MACRO_EXECUTIONS_PER_COMMAND = 1000; ///< How many macro executions one bus command may trigger before the VT abandons the rest. Under the queue this is the sole bound: a self-referencing macro re-enqueues itself on every run, an infinite loop the budget stops. The standard sets no such number; this bound is the VT's own, sized so a worst-case trigger blocks the CAN thread for well under the 3 s working set maintenance timeout
 		std::uint32_t macroExecutionsThisCommand = 0; ///< Macro executions attributed to the bus command currently being processed
 		bool macroExecutionBudgetExhausted = false; ///< Latched when the budget is spent, so abandoning the rest of the macros is logged once rather than once per remaining macro
+		/// @brief One outstanding activation message awaiting its response (ISO 11783-6 Annex H.1), held so
+		/// the tick can retry it unchanged and time it out. The frame is the exact 8 bytes put on the bus,
+		/// so a retry re-sends it verbatim with the same TAN.
+		struct OutstandingActivation
+		{
+			std::array<std::uint8_t, CAN_DATA_LENGTH> frame; ///< The activation frame as sent, re-sent verbatim on a retry
+			std::uint32_t sentAtMs = 0; ///< Timestamp of the last send (initial or retry); the 300 ms window is measured from here
+			std::uint8_t tan = 0; ///< The TAN carried in the frame, matched against the response's TAN
+			std::uint8_t retriesRemaining = 0; ///< Retries left before the working set is treated as an unexpected shutdown
+		};
+		/// @brief A working set's Annex H.1 activation tracking state: the next TAN to allocate, the
+		/// outstanding activation per VT function code (a new send supersedes the prior one), and whether the
+		/// retries have been exhausted with no response.
+		struct ActivationTrackerState
+		{
+			std::map<std::uint8_t, OutstandingActivation> outstanding; ///< At most one outstanding activation per VT function code (H.1 current-value-not-stale)
+			std::uint8_t nextTan = 0; ///< Monotonic 4-bit TAN source (wraps at 16), incremented per new activation
+			bool responseTimedOut = false; ///< Set once retries are exhausted with no response; read by the loss-teardown pass
+		};
+		static constexpr std::uint32_t ACTIVATION_RESPONSE_TIMEOUT_MS = 300; ///< ISO 11783-6 H.1: retry an unanswered activation after 300 ms, and after the third retry's window tear the working set down
+		static constexpr std::uint8_t ACTIVATION_MAX_RETRIES = 3; ///< ISO 11783-6 H.1: retry a required activation response up to 3 times
+		mutable std::map<VirtualTerminalServerManagedWorkingSet *, ActivationTrackerState> activationTrackers; ///< Per-working-set Annex H activation tracking (ISO 11783-6 H.1). Mutable because the activation senders that populate it are const (they logically only transmit). Keyed by the managed working set's raw pointer, stable while the working set is in managedWorkingSetList and cleared when it is erased
 		bool statusMessagePending = true; ///< Set when a VT Status field the standard tracks (ISO 11783-6 G.2 bytes 2-6, or byte 7 bit 6) changes, so update() transmits promptly instead of waiting for the next 1 Hz tick
 		bool auxiliaryInputLearnModeActive = false; ///< Whether the status message reports auxiliary input learn mode (busy-codes bit 0x40)
 		bool initialized = false; ///< True if the server has been initialized, otherwise false

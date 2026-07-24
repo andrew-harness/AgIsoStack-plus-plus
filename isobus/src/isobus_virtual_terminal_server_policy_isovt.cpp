@@ -222,8 +222,12 @@ namespace isobus
 				0xFF, // Reserved
 				0xFF, // Reserved
 				0xFF, // Reserved
-				0xFF // Reserved
+				0xFF // ISO 11783-6 H.10 byte 8: reserved 0xFF at version 5 and prior; stamped with the TAN for a version-6 pair below
 			};
+
+			// Annex H.1: for a version-6 pair this stamps the TAN into byte 8 and records the activation for
+			// response tracking; for any lower pair it leaves the frame byte-identical.
+			stamp_and_record_activation(destination, static_cast<std::uint8_t>(Function::VTESCMessage), buffer);
 
 			// Like the Pointing Event, this goes onto the bus directly rather than through send_response,
 			// the choke point that withholds the VT's response to a command contained in a macro (clause
@@ -674,8 +678,8 @@ namespace isobus
 
 	bool VirtualTerminalServer::tear_down_lost_working_sets()
 	{
-		// Tear down a working set on either of two triggers. Both delete its object pool, drop it as
-		// the active working set, alert the operator, and require the client to re-initialise:
+		// Tear down a working set on any of three triggers. All delete its object pool, drop it as the
+		// active working set, alert the operator, and require the client to re-initialise:
 		//   1. ISO 11783-6 clause 4.6.9, unexpected loss of a working set: a connected working set
 		//      sends a Working Set Maintenance message about once per second, and if those stop
 		//      arriving the VT shall consider it lost after a 3 s timeout. A maintenance timestamp of 0
@@ -686,14 +690,24 @@ namespace isobus
 		//      (request_deletion()), and here the entire pool -- including the pre-update version -- is
 		//      deleted and the working set suspended. request_deletion() is set in the Fail branch of
 		//      that loop and consumed here within the same update() call, so this teardown is immediate.
+		//   3. ISO 11783-6 Annex H.1, unanswered required activation response: for a version-6 pair an
+		//      activation message (Soft Key / Button / Select Input Object / VT ESC / Change Numeric
+		//      Value) that goes unanswered through three retries makes the VT "perform as if an
+		//      unexpected shutdown of the WS occurred (see 4.6.9)", so this is the same 4.6.9 teardown.
+		//      update_activation_trackers() sets the flag is_activation_response_timed_out() reads, in the
+		//      update() call that runs this pass. H.1 also requires the VT to answer the working set's next
+		//      Working Set Maintenance message with the Acknowledgement:NACK -- which happens for free once
+		//      the working set is erased: a maintenance message from a source that is no longer managed
+		//      falls through to the generic unmanaged-source NACK in process_rx_message, and every
+		//      subsequent one is NACKed until the client re-initialises with the init bit set (restoring a
+		//      managed working set), matching 4.6.9's "the working set must re-initialise".
 		// This is a separate pass from the parse-completion loop above so that erasing a working set
 		// cannot invalidate that loop's iterator. The operator-facing alert UI is deferred with the SDL
 		// window (like the acoustic alarm in clause 4.4 b), so each reason is logged here and raised on
 		// the backend once that exists; no audio/UI dependency is added.
-		// Out of scope here: NACK-until-reinitialise (re-initialisation happens naturally once the
-		// working set is gone). Auxiliary-assignment removal rides the delete_object_pool call below:
-		// the derived server's override drops the lost working set's AUX-N assignments (the AUX-N
-		// engine lives in the derived server, ADR-0007).
+		// Auxiliary-assignment removal rides the delete_object_pool call below: the derived server's
+		// override drops the lost working set's AUX-N assignments (the AUX-N engine lives in the derived
+		// server, ADR-0007).
 		bool workingSetWasTornDown = false;
 
 		for (auto workingSetIterator = managedWorkingSetList.begin(); managedWorkingSetList.end() != workingSetIterator;)
@@ -704,6 +718,7 @@ namespace isobus
 			const bool maintenanceTimedOut = (0 != maintenanceTimestamp) &&
 			  (isobus::SystemTiming::time_expired_ms(maintenanceTimestamp, 3000));
 			const bool poolInvalidated = ws->is_deletion_requested();
+			const bool activationTimedOut = is_activation_response_timed_out(ws);
 
 			// Invariant: the CAN thread never waits on an object pool parse. Erasing a working set drops
 			// what is normally the last reference to it, and its destructor joins the parse worker to
@@ -730,7 +745,7 @@ namespace isobus
 			// block shutdown in the destructor rather than aborting there.
 			const bool parseOutstanding = ws->is_object_pool_parse_outstanding();
 
-			if ((maintenanceTimedOut || poolInvalidated) && (!parseOutstanding))
+			if ((maintenanceTimedOut || poolInvalidated || activationTimedOut) && (!parseOutstanding))
 			{
 				const bool workingSetHasControlFunction = (nullptr != ws->get_control_function());
 				std::uint8_t lostAddress = isobus::NULL_CAN_ADDRESS;
@@ -739,15 +754,20 @@ namespace isobus
 					lostAddress = ws->get_control_function()->get_address();
 				}
 
-				// A working set could satisfy both triggers; the C.2.6 invalid-update message takes
-				// precedence over the 4.6.9 timeout message.
+				// A working set could satisfy several triggers; the C.2.6 invalid-update message takes
+				// precedence, then the 4.6.9 maintenance timeout, then the H.1 activation-response timeout
+				// (which is itself a 4.6.9 unexpected shutdown, so it maps to the same loss reason below).
 				if (poolInvalidated)
 				{
 					LOG_ERROR("[VT Server]: Working set at address %u had an invalid object pool update - deleting the entire pool from volatile memory and suspending the working set per ISO 11783-6 C.2.6.", lostAddress);
 				}
-				else
+				else if (maintenanceTimedOut)
 				{
 					LOG_ERROR("[VT Server]: Working set at address %u lost - no Working Set Maintenance message for over 3 s. Deleting its object pool per ISO 11783-6 4.6.9.", lostAddress);
+				}
+				else
+				{
+					LOG_ERROR("[VT Server]: Working set at address %u lost - a required activation response was not received after three retries. Treating it as an unexpected shutdown per ISO 11783-6 H.1 / 4.6.9 and deleting its object pool.", lostAddress);
 				}
 
 				// Clause 4.6.9 requires the VT to alert the operator on an unexpected working-set shutdown,
@@ -755,7 +775,10 @@ namespace isobus
 				// itself is a display-layer concern, so this raises the event with the working set (still
 				// valid here, before the erase below) and the reason, and the derived server's listener
 				// surfaces it. The logging above is the diagnostic record; this is the operator-facing seam.
-				onWorkingSetLostEventDispatcher.call(ws, poolInvalidated ? WorkingSetLossReason::InvalidObjectPoolUpdate : WorkingSetLossReason::MaintenanceTimeout);
+				onWorkingSetLostEventDispatcher.call(ws,
+				                                     poolInvalidated ? WorkingSetLossReason::InvalidObjectPoolUpdate :
+				                                                       (maintenanceTimedOut ? WorkingSetLossReason::MaintenanceTimeout :
+				                                                                              WorkingSetLossReason::ActivationResponseTimeout));
 
 				if ((ws == activeWorkingSet) ||
 				    (workingSetHasControlFunction && (lostAddress == activeWorkingSetMasterAddress)))
@@ -772,6 +795,10 @@ namespace isobus
 				{
 					LOG_WARNING("[VT Server]: Failed to delete the object pool for the lost working set at address %u.", lostAddress);
 				}
+
+				// Drop any Annex H activation-tracker state before the working set is erased, so a later
+				// working set allocated at the same address cannot inherit its outstanding activations.
+				clear_activation_tracker(ws);
 
 				workingSetIterator = managedWorkingSetList.erase(workingSetIterator);
 				workingSetWasTornDown = true;

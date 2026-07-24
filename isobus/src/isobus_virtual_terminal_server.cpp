@@ -2453,7 +2453,19 @@ namespace isobus
 			case Function::VTChangeStringValueMessage:
 			case Function::VTControlAudioSignalTerminationMessage:
 			{
-				// Todo, do something with the responses
+				// ISO 11783-6 Annex H: a working set compatible with VT version 6 answers each activation
+				// message with a response echoing its TAN. Pair it with the outstanding activation so the
+				// retry/teardown machinery stops. The TAN sits in the same byte as the message it answers
+				// (H.2/H.4/H.8/H.10 byte 8, H.12 byte 4); a function with no tracked TAN maps to the
+				// no-offset sentinel and is ignored, and a version-5 pair recorded nothing so the response
+				// finds no outstanding entry -- either way a harmless no-op.
+				const std::uint8_t responseFunction = data[0];
+				const std::size_t tanByte = activation_tan_byte_offset(responseFunction);
+				if ((tanByte < CAN_DATA_LENGTH) && (tanByte < data.size()))
+				{
+					const std::uint8_t responseTan = static_cast<std::uint8_t>((data[tanByte] >> 4) & 0x0Fu);
+					handle_activation_response(managedWorkingSet, responseFunction, responseTan);
+				}
 			}
 			break;
 
@@ -2749,7 +2761,11 @@ namespace isobus
 			buffer[4] = get_low_byte(parentObjectId);
 			buffer[5] = get_high_byte(parentObjectId);
 			buffer[6] = keyNumber;
-			buffer[7] = 0xFF; // Reserved TODO: TAN
+			buffer[7] = 0xFF; // ISO 11783-6 H.4 byte 8: reserved 0xFF at version 5 and prior; stamped with the TAN for a version-6 pair below
+
+			// Annex H.1: for a version-6 pair this stamps the TAN into byte 8 and records the activation for
+			// response tracking; for any lower pair it leaves the frame byte-identical.
+			stamp_and_record_activation(destination, static_cast<std::uint8_t>(Function::ButtonActivationMessage), buffer);
 
 			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 			                                                        buffer.data(),
@@ -2771,12 +2787,16 @@ namespace isobus
 				static_cast<std::uint8_t>(Function::VTChangeNumericValueMessage),
 				get_low_byte(objectId),
 				get_high_byte(objectId),
-				0xFF, // TODO: TAN, version 6
+				0xFF, // ISO 11783-6 H.12 byte 4: reserved 0xFF at version 5 and prior; stamped with the TAN for a version-6 pair below
 				get_byte(value, 0),
 				get_byte(value, 1),
 				get_byte(value, 2),
 				get_byte(value, 3)
 			};
+
+			// Annex H.1: for a version-6 pair this stamps the TAN into byte 4 and records the activation for
+			// response tracking; for any lower pair it leaves the frame byte-identical.
+			stamp_and_record_activation(destination, static_cast<std::uint8_t>(Function::VTChangeNumericValueMessage), buffer);
 
 			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 			                                                        buffer.data(),
@@ -2802,8 +2822,12 @@ namespace isobus
 				static_cast<std::uint8_t>(isObjectOpenForInput),
 				0xFF,
 				0xFF,
-				0xFF // Reserved TODO: TAN
+				0xFF // ISO 11783-6 H.8 byte 8: reserved 0xFF at version 5 and prior; stamped with the TAN for a version-6 pair below
 			};
+
+			// Annex H.1: for a version-6 pair this stamps the TAN into byte 8 and records the activation for
+			// response tracking; for any lower pair it leaves the frame byte-identical.
+			stamp_and_record_activation(destination, static_cast<std::uint8_t>(Function::VTSelectInputObjectMessage), buffer);
 
 			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 			                                                        buffer.data(),
@@ -2829,8 +2853,12 @@ namespace isobus
 				get_low_byte(parentObjectId),
 				get_high_byte(parentObjectId),
 				keyNumber,
-				0xFF // Reserved TODO: TAN
+				0xFF // ISO 11783-6 H.2 byte 8: reserved 0xFF at version 5 and prior; stamped with the TAN for a version-6 pair below
 			};
+
+			// Annex H.1: for a version-6 pair this stamps the TAN into byte 8 and records the activation for
+			// response tracking; for any lower pair it leaves the frame byte-identical.
+			stamp_and_record_activation(destination, static_cast<std::uint8_t>(Function::SoftKeyActivationMessage), buffer);
 
 			retVal = CANNetworkManager::CANNetwork.send_can_message(static_cast<std::uint32_t>(CANLibParameterGroupNumber::VirtualTerminalToECU),
 			                                                        buffer.data(),
@@ -3393,6 +3421,11 @@ namespace isobus
 				}
 			}
 		}
+
+		// ISO 11783-6 Annex H.1: retry outstanding activations and flag a working set whose required
+		// activation responses never arrived. This runs before the loss-teardown pass below so a working
+		// set flagged here is torn down (as a clause 4.6.9 unexpected shutdown) in this same update().
+		update_activation_trackers();
 
 		const bool workingSetWasTornDown = tear_down_lost_working_sets();
 
