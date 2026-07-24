@@ -357,6 +357,12 @@ namespace isobus
 		/// @returns The bitfield of supported large fonts
 		virtual std::uint8_t get_supported_large_fonts_bitfield() const;
 
+		/// @brief By default, the VT server reports the font styles the base renderer applies: bold,
+		/// crossed-out, underlined, italic and proportional (0x8F). Override this to declare a
+		/// different set, e.g. a VT that also renders inverted or flashing text.
+		/// @returns The bitfield of supported font styles (ISO 11783-6 D.7 byte 8)
+		virtual std::uint8_t get_supported_font_styles_bitfield() const;
+
 		/// @brief This function is called when the Identify VT version message is received
 		virtual void identify_vt();
 
