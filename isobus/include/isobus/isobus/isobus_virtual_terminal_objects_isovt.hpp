@@ -692,10 +692,43 @@ namespace isobus
 		/// @param[in] length The number of bytes to copy
 		void set_raw_data(const std::uint8_t *data, std::uint32_t length);
 
+		/// @brief Stores the decoded RGBA raster for this graphic (8 bits per channel, 4 bytes per pixel,
+		/// row-major). The decoder lives in the display layer (isovt), never in this fork -- this object only
+		/// holds the result so the renderer can read it back through a pointer that outlives the draw call.
+		/// The raster is decoded once at pool commit time, off the draw path (ADR-0006), and B.27's rule that
+		/// a Graphic Data object "is not affected by either the Colour Map object or the Colour Palette object"
+		/// is honoured for free: RGBA is a final colour, resolved through no palette.
+		/// @param[in] width The decoded pixel width
+		/// @param[in] height The decoded pixel height
+		/// @param[in] rgba The decoded raster, width*height*4 bytes, moved into this object
+		void set_decoded_raster(std::uint16_t width, std::uint16_t height, std::vector<std::uint8_t> rgba);
+
+		/// @brief Returns the decoded raster width in pixels (zero until set_decoded_raster runs)
+		/// @returns The decoded raster width
+		std::uint16_t get_decoded_width() const;
+
+		/// @brief Returns the decoded raster height in pixels (zero until set_decoded_raster runs)
+		/// @returns The decoded raster height
+		std::uint16_t get_decoded_height() const;
+
+		/// @brief Returns the decoded RGBA raster (8 bits per channel, row-major, get_decoded_width * height * 4 bytes)
+		/// @returns The decoded raster; empty until set_decoded_raster runs
+		const std::vector<std::uint8_t> &get_decoded_raster() const;
+
+		/// @brief Returns whether the raw bytes have been decoded into an RGBA raster yet
+		/// @details The decode seam gates on this so each object is decoded exactly once, and the renderer
+		/// draws nothing for a Graphic Data whose raw bytes could not be decoded (it stays false).
+		/// @returns True once set_decoded_raster has stored a raster, otherwise false
+		bool is_decoded() const;
+
 	private:
 		static constexpr std::uint32_t MIN_OBJECT_LENGTH = 8; ///< Table B.74: id + type + format + 4-byte length, with zero raw bytes
 		Format format = Format::PNG; ///< Graphic format (AID 1); only PNG is accepted
 		std::vector<std::uint8_t> rawData; ///< The raw, undecoded graphic bytes
+		std::vector<std::uint8_t> decodedRaster; ///< The decoded RGBA raster (4 bytes/pixel, row-major); empty until decoded
+		std::uint16_t decodedWidth = 0; ///< Decoded raster width in pixels
+		std::uint16_t decodedHeight = 0; ///< Decoded raster height in pixels
+		bool decoded = false; ///< True once a raster has been decoded and stored
 	};
 
 	/// @brief The Working Set Special Controls object (ISO 11783-6 Table B.78, VT version 6 and later)

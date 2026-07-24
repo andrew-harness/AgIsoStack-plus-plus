@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <utility>
 
 namespace isobus
 {
@@ -1134,6 +1135,34 @@ namespace isobus
 		{
 			rawData.clear();
 		}
+	}
+
+	void GraphicData::set_decoded_raster(std::uint16_t width, std::uint16_t height, std::vector<std::uint8_t> rgba)
+	{
+		decodedWidth = width;
+		decodedHeight = height;
+		decodedRaster = std::move(rgba);
+		decoded = true;
+	}
+
+	std::uint16_t GraphicData::get_decoded_width() const
+	{
+		return decodedWidth;
+	}
+
+	std::uint16_t GraphicData::get_decoded_height() const
+	{
+		return decodedHeight;
+	}
+
+	const std::vector<std::uint8_t> &GraphicData::get_decoded_raster() const
+	{
+		return decodedRaster;
+	}
+
+	bool GraphicData::is_decoded() const
+	{
+		return decoded;
 	}
 
 	VirtualTerminalObjectType WorkingSetSpecialControls::get_object_type() const

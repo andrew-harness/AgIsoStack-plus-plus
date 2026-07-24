@@ -988,6 +988,43 @@ namespace isobus
 						}
 						break;
 
+						case VirtualTerminalObjectType::ScaledGraphic:
+						{
+							// ISO 11783-6:2018 F.22 / Table B.76: a Change Numeric Value on a Scaled Graphic
+							// (VT version 6 and later) retargets its Value attribute, a 2-byte object ID in
+							// bytes 5-6. B.28 restricts that target to a Graphic Data object, a Picture Graphic
+							// object, an Object Pointer object, or the NULL object; anything else is refused.
+							// F.23 footnote c sets byte 4 bit 0 (Invalid Object ID) specifically when the
+							// command changes a pointer value to an invalid object, which is exactly this case.
+							const std::uint16_t newTarget = get_low_16_bits(value);
+							bool validTarget = (NULL_OBJECT_ID == newTarget);
+							if (!validTarget)
+							{
+								const auto referenced = managedWorkingSet->get_object_by_id(newTarget);
+								if (nullptr != referenced)
+								{
+									const VirtualTerminalObjectType referencedType = referenced->get_object_type();
+									validTarget = (VirtualTerminalObjectType::GraphicData == referencedType) ||
+									  (VirtualTerminalObjectType::PictureGraphic == referencedType) ||
+									  (VirtualTerminalObjectType::ObjectPointer == referencedType);
+								}
+							}
+
+							if (validTarget)
+							{
+								std::static_pointer_cast<ScaledGraphic>(lTargetObject)->set_value(newTarget);
+								dispatch_repaint(managedWorkingSet);
+								send_change_numeric_value_response(objectId, 0, value, managedWorkingSet->get_control_function());
+							}
+							else
+							{
+								send_change_numeric_value_response(objectId, get_bit(static_cast<std::uint8_t>(ChangeNumericValueErrorBit::InvalidObjectID)), value, managedWorkingSet->get_control_function());
+								LOG_WARNING("[VT Server]: Client %u change numeric value on scaled graphic %u refused: target %u is not a graphic data, picture graphic, object pointer, or NULL", managedWorkingSet->get_control_function()->get_address(), objectId, newTarget);
+								logSuccess = false;
+							}
+						}
+						break;
+
 						default:
 						{
 							send_change_numeric_value_response(objectId, get_bit(static_cast<std::uint8_t>(ChangeNumericValueErrorBit::InvalidObjectID)), value, managedWorkingSet->get_control_function());
