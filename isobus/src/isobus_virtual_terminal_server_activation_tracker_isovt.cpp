@@ -23,12 +23,14 @@ namespace isobus
 {
 	std::size_t VirtualTerminalServer::activation_tan_byte_offset(std::uint8_t functionCode)
 	{
-		// ISO 11783-6 Annex H: the TAN occupies bits 7-4 of one message-specific byte, bits 3-0 = 0xF.
-		// Soft Key Activation (H.2), Button Activation (H.4), VT Select Input Object (H.8) and VT ESC
-		// (H.10) carry it in byte 8; VT Change Numeric Value (H.12) carries it in byte 4. The Pointing
-		// Event (H.6) instead puts a TAN in byte 6 alongside the touch state -- a different layout that
-		// also needs the Parent Mask Object ID in bytes 7-8 -- so it is deferred to a later slice and is
-		// intentionally not tracked here.
+		// ISO 11783-6 Annex H: the TAN occupies bits 7-4 of one message-specific byte. Soft Key
+		// Activation (H.2), Button Activation (H.4), VT Select Input Object (H.8) and VT ESC (H.10)
+		// carry it in byte 8; VT Change Numeric Value (H.12) carries it in byte 4. For all of those the
+		// byte's low nibble is reserved 0xF. The Pointing Event (H.6) carries the TAN in byte 6 bits 7-4,
+		// but its low nibble is the Touch State (0/1/2), not reserved -- stamp_and_record_activation
+		// preserves whatever low nibble the sender built there, so this byte offset is all the pairing
+		// needs to distinguish. Byte offsets are zero-based here (byte 8 = index 7, byte 6 = index 5,
+		// byte 4 = index 3).
 		switch (static_cast<Function>(functionCode))
 		{
 			case Function::SoftKeyActivationMessage:
@@ -36,6 +38,9 @@ namespace isobus
 			case Function::VTSelectInputObjectMessage:
 			case Function::VTESCMessage:
 				return 7;
+
+			case Function::PointingEventMessage:
+				return 5;
 
 			case Function::VTChangeNumericValueMessage:
 				return 3;
@@ -80,8 +85,11 @@ namespace isobus
 		const std::uint8_t tan = state.nextTan;
 		state.nextTan = static_cast<std::uint8_t>((state.nextTan + 1u) & 0x0Fu);
 
-		// ISO 11783-6 Annex H: TAN in bits 7-4, bits 3-0 reserved 0xF.
-		frame[tanByte] = static_cast<std::uint8_t>((tan << 4) | 0x0Fu);
+		// ISO 11783-6 Annex H: TAN in bits 7-4. The low nibble is left as the sender built it: reserved
+		// 0xF for Soft Key / Button / Select Input / ESC / Change Numeric Value (whose builders fill the
+		// byte 0xFF), and the Touch State for the Pointing Event (H.6 byte 6 bits 3-0). Preserving it is
+		// what lets a retry resend the same frame -- including the same touch state -- unchanged.
+		frame[tanByte] = static_cast<std::uint8_t>((tan << 4) | (frame[tanByte] & 0x0Fu));
 
 		// H.1's current-value-not-stale rule: a new activation for the same function supersedes the prior
 		// outstanding one (a new state/value carries a fresh TAN), so only the latest is retried. operator[]

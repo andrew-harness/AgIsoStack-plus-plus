@@ -3228,8 +3228,25 @@ namespace isobus
 	{
 		std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = { 0 };
 
+		// ISO 11783-6 G.2 byte 2 (buffer[1]) is the source address of the Working Set Master that owns the
+		// VT. G.2 places an extra requirement on it for a version-6-or-later VT: when the Data Mask is
+		// completely covered or not visible at all -- "for example if a proprietary screen is visible",
+		// which our operator TAB screens are -- and the cover is not the mask's own input means, the VT
+		// "shall set Byte 2 to FF16, FE16 or the VT's source address". We report the VT's own source
+		// address: G.2's own example lists it first ("the address of the VT itself, the null address FE,
+		// or the global address FF"), and it is the most self-describing of the three -- it names the VT
+		// itself as what is on the screen, and a Working Set comparing byte 2 to its own address sees a
+		// mismatch and correctly concludes it no longer owns the VT. This is keyed on the VT version alone
+		// (a proprietary VT screen is a VT-level condition, not a per-client one), so it does not use the
+		// version-6 PAIR gate. A version-5-or-prior VT never takes this branch, so its byte 2 is unchanged.
+		std::uint8_t owningAddress = activeWorkingSetMasterAddress;
+		if (proprietaryScreenActive && (get_version() >= VTVersion::Version6))
+		{
+			owningAddress = (nullptr != serverInternalControlFunction) ? serverInternalControlFunction->get_address() : isobus::NULL_CAN_ADDRESS;
+		}
+
 		buffer[0] = static_cast<std::uint8_t>(Function::VTStatusMessage);
-		buffer[1] = activeWorkingSetMasterAddress;
+		buffer[1] = owningAddress;
 		buffer[2] = get_low_byte(activeWorkingSetDataMaskObjectID);
 		buffer[3] = get_high_byte(activeWorkingSetDataMaskObjectID);
 		buffer[4] = get_low_byte(activeWorkingSetSoftkeyMaskObjectID);

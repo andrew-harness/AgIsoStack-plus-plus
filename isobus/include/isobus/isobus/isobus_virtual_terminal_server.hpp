@@ -1602,6 +1602,7 @@ namespace isobus
 		std::uint32_t statusMessageTimestamp_ms = 0; ///< The timestamp of the last status message sent
 		std::uint16_t displayedAlarmMaskObjectID = NULL_OBJECT_ID; ///< The object ID of the Alarm Mask currently on screen, or NULL_OBJECT_ID when the displayed mask is not an Alarm Mask
 		std::uint16_t activeWorkingSetDataMaskObjectID = NULL_OBJECT_ID; ///< The object ID of the active working set's data mask
+		bool proprietaryScreenActive = false; ///< ISO 11783-6 G.2: a proprietary VT screen (an operator TAB screen) fully covers the active mask, so at VT version 6 the VT Status byte 2 reports no Working Set owns the VT. Set through VtServer::set_proprietary_screen_active on the CAN thread
 		std::uint16_t activeWorkingSetSoftkeyMaskObjectID = NULL_OBJECT_ID; ///< The object ID of the active working set's soft key mask
 		std::uint8_t activeWorkingSetMasterAddress = NULL_CAN_ADDRESS; ///< The address of the active working set's master
 		std::uint8_t busyCodesBitfield = 0; ///< The busy codes bitfield

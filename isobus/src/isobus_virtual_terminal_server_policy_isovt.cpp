@@ -187,10 +187,41 @@ namespace isobus
 				get_high_byte(xPosition),
 				get_low_byte(yPosition),
 				get_high_byte(yPosition),
-				touchState,
-				0xFF, // Reserved
-				0xFF // Reserved
+				touchState, // ISO 11783-6 H.6 byte 6: touch state (v4-5) or 0xFF (v3-); the TAN is stamped into bits 7-4 for a version-6 pair below, preserving this state in bits 3-0
+				0xFF, // H.6 bytes 7-8: reserved 0xFF at version 5 and prior; the Parent Mask Object ID for a version-6 pair below
+				0xFF
 			};
+
+			auto workingSet = find_managed_working_set_for(destination);
+			if (is_version6_pair(workingSet))
+			{
+				// ISO 11783-6 4.6.23: the Pointing Event is deprecated on an Alarm Mask at VT version 6
+				// and later ("VT version 4 and 5 included Alarm Mask, which has been deprecated"), and
+				// H.6 lists only Data Mask and Free Form Window Mask (type 0) as its parent mask types.
+				// So a version-6 pair whose active mask is an Alarm Mask gets no Pointing Event at all --
+				// no send, no TAN, nothing recorded for retry. A version-5-or-prior pair keeps the older
+				// behaviour (the message was allowed on an Alarm Mask), unchanged, because this branch
+				// is not taken for it.
+				auto activeMask = get_active_mask_object(workingSet);
+				if ((nullptr != activeMask) && (VirtualTerminalObjectType::AlarmMask == activeMask->get_object_type()))
+				{
+					return false;
+				}
+
+				// H.6 bytes 7-8 (version 6 and later): the Parent Mask Object ID of the touched mask,
+				// little endian. It must be in the frame before stamp_and_record_activation records it,
+				// so a retry resends the same parent mask ID. NULL_OBJECT_ID (0xFFFF) is the honest floor
+				// when the mask cannot be resolved, and it serialises to the same 0xFF 0xFF the reserved
+				// bytes already hold.
+				const std::uint16_t parentMaskObjectId = (nullptr != activeMask) ? activeMask->get_id() : NULL_OBJECT_ID;
+				buffer[6] = get_low_byte(parentMaskObjectId);
+				buffer[7] = get_high_byte(parentMaskObjectId);
+			}
+
+			// Annex H.1: for a version-6 pair this stamps the TAN into byte 6 bits 7-4 (leaving the touch
+			// state in bits 3-0) and records the activation for response tracking; for any lower pair the
+			// frame is byte-identical to before Annex H tracking.
+			stamp_and_record_activation(destination, static_cast<std::uint8_t>(Function::PointingEventMessage), buffer);
 
 			// This goes onto the bus directly rather than through send_response, which is the choke
 			// point that withholds the VT's response to a command contained in a macro (clause
