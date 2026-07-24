@@ -174,6 +174,16 @@ namespace isobus
 		/// @param[in] value The Colour Map object ID to activate, or NULL_OBJECT_ID for the default palette
 		void set_active_colour_map_object_id(std::uint16_t value, CANLibBadge<VirtualTerminalServer>);
 
+		/// @brief Returns the object ID of the Colour Palette selected for this working set -- by the Select
+		/// Colour Map or Palette command (F.60, VT version 6) or a Working Set Special Controls object's
+		/// initial selection (B.29) -- or NULL_OBJECT_ID when the VT standard colour palette is in use.
+		/// @returns The active Colour Palette object ID, or NULL_OBJECT_ID for the VT standard palette
+		std::uint16_t get_active_colour_palette_object_id() const;
+
+		/// @brief Stores the object ID of the Colour Palette selected for this working set (F.60 / B.29).
+		/// @param[in] value The Colour Palette object ID to activate, or NULL_OBJECT_ID for the VT standard palette
+		void set_active_colour_palette_object_id(std::uint16_t value, CANLibBadge<VirtualTerminalServer>);
+
 		/// @brief Returns the object ID of the mask this working set has locked with the Lock/Unlock Mask
 		/// command (F.46), or NULL_OBJECT_ID when it holds no lock.
 		/// @returns The locked mask's object ID, or NULL_OBJECT_ID when no mask is locked
@@ -271,6 +281,7 @@ namespace isobus
 		std::uint16_t focusedObject = NULL_OBJECT_ID; ///< Stores the object ID of the currently focused object
 		std::uint16_t objectOpenForInput = NULL_OBJECT_ID; ///< Stores the object ID of the object that is open for operator input, or NULL_OBJECT_ID when no input field is open
 		std::uint16_t activeColourMapObjectId = NULL_OBJECT_ID; ///< The object ID of the Colour Map selected by the Select Colour Map command (F.60), or NULL_OBJECT_ID for the default palette
+		std::uint16_t activeColourPaletteObjectId = NULL_OBJECT_ID; ///< The object ID of the Colour Palette selected for this working set (F.60 / B.29), or NULL_OBJECT_ID for the VT standard palette
 		std::uint16_t maskLockObjectID = NULL_OBJECT_ID; ///< The object ID of the mask locked by the Lock/Unlock Mask command (F.46), or NULL_OBJECT_ID when no mask is locked
 		std::uint16_t maskLockTimeout_ms = 0; ///< The lock timeout (in ms) the Lock Mask command carried, or zero when the lock does not time out
 		bool wasLoadedFromNonVolatileMemory = false; ///< Used to tell the server how this object pool was obtained

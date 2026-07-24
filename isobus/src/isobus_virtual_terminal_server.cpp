@@ -3281,6 +3281,16 @@ namespace isobus
 			if (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Success == ws->get_object_pool_processing_state())
 			{
 				ws->join_parsing_thread();
+
+				// ISO 11783-6 B.29 (VT version 6 and later): a Working Set Special Controls object's initial
+				// Colour Map / Colour Palette references are activated before the pool is first rendered, so
+				// apply them here -- after the parse published the tree, ahead of the arbitration that puts a
+				// mask on screen.
+				if (get_version() >= VTVersion::Version6)
+				{
+					apply_working_set_special_controls(ws);
+				}
+
 				if (ws->get_was_object_pool_loaded_from_non_volatile_memory())
 				{
 					// A pool loaded via Load Version is completed by a Load Version response, not an

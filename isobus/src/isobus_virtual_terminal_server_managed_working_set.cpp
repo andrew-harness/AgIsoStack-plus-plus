@@ -203,6 +203,16 @@ namespace isobus
 		activeColourMapObjectId = value;
 	}
 
+	std::uint16_t VirtualTerminalServerManagedWorkingSet::get_active_colour_palette_object_id() const
+	{
+		return activeColourPaletteObjectId;
+	}
+
+	void VirtualTerminalServerManagedWorkingSet::set_active_colour_palette_object_id(std::uint16_t value, CANLibBadge<VirtualTerminalServer>)
+	{
+		activeColourPaletteObjectId = value;
+	}
+
 	std::uint16_t VirtualTerminalServerManagedWorkingSet::get_mask_lock_object_id() const
 	{
 		return maskLockObjectID;

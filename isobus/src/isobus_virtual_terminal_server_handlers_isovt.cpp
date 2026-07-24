@@ -428,12 +428,30 @@ namespace isobus
 	{
 		auto objectId = get_little_endian_uint16(data, 1);
 
+		// ISO 11783-6 F.60: at VT version 6 and later the referenced object may be a Colour Palette as well
+		// as a Colour Map, and the Working Set Special Controls object (B.29) is updated according to the
+		// referenced object. At version 5 and prior only a Colour Map is valid and there is no WSSC, so
+		// every branch below stays byte-identical to the pre-version-6 behaviour for a version-5 server.
+		const bool versionSix = (get_version() >= VTVersion::Version6);
+
 		if (NULL_OBJECT_ID == objectId)
 		{
+			// F.60: object ID 0xFFFF restores the default colour mapping (A.3) -- no Colour Map remap and
+			// the VT standard palette -- so both selections are cleared.
 			managedWorkingSet->set_active_colour_map_object_id(NULL_OBJECT_ID, {});
+			managedWorkingSet->set_active_colour_palette_object_id(NULL_OBJECT_ID, {});
+			if (versionSix)
+			{
+				const std::shared_ptr<WorkingSetSpecialControls> specialControls = find_working_set_special_controls(managedWorkingSet);
+				if (nullptr != specialControls)
+				{
+					specialControls->set_colour_map_object_id(NULL_OBJECT_ID);
+					specialControls->set_colour_palette_object_id(NULL_OBJECT_ID);
+				}
+			}
 			send_select_colour_map_response(objectId, 0, managedWorkingSet->get_control_function());
 			dispatch_repaint(managedWorkingSet);
-			LOG_DEBUG("[VT Server]: Client %u select colour map command restored the default palette", managedWorkingSet->get_control_function()->get_address());
+			LOG_DEBUG("[VT Server]: Client %u select colour map or palette command restored the default palette", managedWorkingSet->get_control_function()->get_address());
 		}
 		else
 		{
@@ -442,19 +460,42 @@ namespace isobus
 			if (nullptr == object)
 			{
 				send_select_colour_map_response(objectId, get_bit(static_cast<std::uint8_t>(SelectColourMapErrorBit::InvalidObjectID)), managedWorkingSet->get_control_function());
-				LOG_WARNING("[VT Server]: Client %u select colour map failed because the object ID %u doesn't exist", managedWorkingSet->get_control_function()->get_address(), objectId);
+				LOG_WARNING("[VT Server]: Client %u select colour map or palette failed because the object ID %u doesn't exist", managedWorkingSet->get_control_function()->get_address(), objectId);
 			}
-			else if (VirtualTerminalObjectType::ColourMap != object->get_object_type())
-			{
-				send_select_colour_map_response(objectId, get_bit(static_cast<std::uint8_t>(SelectColourMapErrorBit::InvalidColourMap)), managedWorkingSet->get_control_function());
-				LOG_WARNING("[VT Server]: Client %u select colour map failed because the object ID %u is not a Colour Map", managedWorkingSet->get_control_function()->get_address(), objectId);
-			}
-			else
+			else if (VirtualTerminalObjectType::ColourMap == object->get_object_type())
 			{
 				managedWorkingSet->set_active_colour_map_object_id(objectId, {});
+				if (versionSix)
+				{
+					const std::shared_ptr<WorkingSetSpecialControls> specialControls = find_working_set_special_controls(managedWorkingSet);
+					if (nullptr != specialControls)
+					{
+						specialControls->set_colour_map_object_id(objectId);
+					}
+				}
 				send_select_colour_map_response(objectId, 0, managedWorkingSet->get_control_function());
 				dispatch_repaint(managedWorkingSet);
 				LOG_DEBUG("[VT Server]: Client %u selected colour map object %u", managedWorkingSet->get_control_function()->get_address(), objectId);
+			}
+			else if (versionSix && (VirtualTerminalObjectType::ColourPalette == object->get_object_type()))
+			{
+				managedWorkingSet->set_active_colour_palette_object_id(objectId, {});
+				const std::shared_ptr<WorkingSetSpecialControls> specialControls = find_working_set_special_controls(managedWorkingSet);
+				if (nullptr != specialControls)
+				{
+					specialControls->set_colour_palette_object_id(objectId);
+				}
+				send_select_colour_map_response(objectId, 0, managedWorkingSet->get_control_function());
+				dispatch_repaint(managedWorkingSet);
+				LOG_DEBUG("[VT Server]: Client %u selected colour palette object %u", managedWorkingSet->get_control_function()->get_address(), objectId);
+			}
+			else
+			{
+				// Not a Colour Map, and not a Colour Palette the server's version accepts. At version 5 a
+				// Colour Palette target lands here too -- the same InvalidColourMap error a non-Colour-Map
+				// object gets today.
+				send_select_colour_map_response(objectId, get_bit(static_cast<std::uint8_t>(SelectColourMapErrorBit::InvalidColourMap)), managedWorkingSet->get_control_function());
+				LOG_WARNING("[VT Server]: Client %u select colour map or palette failed because the object ID %u is not a valid Colour Map or Colour Palette", managedWorkingSet->get_control_function()->get_address(), objectId);
 			}
 		}
 	}

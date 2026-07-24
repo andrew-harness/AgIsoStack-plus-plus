@@ -608,6 +608,43 @@ namespace isobus
 		onRepaintEventDispatcher.call(workingSet);
 	}
 
+	std::shared_ptr<WorkingSetSpecialControls> VirtualTerminalServer::find_working_set_special_controls(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &managedWorkingSet) const
+	{
+		if (nullptr == managedWorkingSet)
+		{
+			return nullptr;
+		}
+
+		// Bind the snapshot to a named local: iterating *get_object_tree() directly would walk a freed map
+		// once the returned temporary is destroyed (the C++17 range-temporary lifetime trap).
+		const std::shared_ptr<const ObjectTree> tree = managedWorkingSet->get_object_tree();
+		for (const auto &entry : *tree)
+		{
+			if ((nullptr != entry.second) &&
+			    (VirtualTerminalObjectType::WorkingSetSpecialControls == entry.second->get_object_type()))
+			{
+				return std::static_pointer_cast<WorkingSetSpecialControls>(entry.second);
+			}
+		}
+		return nullptr;
+	}
+
+	void VirtualTerminalServer::apply_working_set_special_controls(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &managedWorkingSet)
+	{
+		// ISO 11783-6 B.29: a Working Set Special Controls object's Colour Map and Colour Palette
+		// references, "if not NULL, are activated prior to the first rendering of the Object Pool". A pool
+		// carries zero or one such object; when present, seed this working set's active Colour Map and
+		// Colour Palette selection from it before the pool is rendered. A NULL reference selects no Colour
+		// Map / the VT standard palette, which is the working set's default, so applying it is harmless. A
+		// pool WITHOUT this object leaves any runtime Select Colour Map or Palette selection untouched.
+		const std::shared_ptr<WorkingSetSpecialControls> specialControls = find_working_set_special_controls(managedWorkingSet);
+		if (nullptr != specialControls)
+		{
+			managedWorkingSet->set_active_colour_map_object_id(specialControls->get_colour_map_object_id(), {});
+			managedWorkingSet->set_active_colour_palette_object_id(specialControls->get_colour_palette_object_id(), {});
+		}
+	}
+
 	void VirtualTerminalServer::release_expired_mask_locks()
 	{
 		// ISO 11783-6 F.46: a Lock Mask command may carry a timeout, and once it expires the VT releases

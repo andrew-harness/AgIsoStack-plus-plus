@@ -1079,10 +1079,24 @@ namespace isobus
 		/// @param[in] managedWorkingSet The working set that sent the command
 		void handle_extended_load_version_command(const CANMessage &message, const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
 
-		/// @brief Handles a Select Colour Map command (0xBA), selecting the working set's active Colour Map object
+		/// @brief Handles a Select Colour Map or Palette command (0xBA), selecting the working set's active
+		/// Colour Map object or -- at VT version 6 and later -- its active Colour Palette object (ISO 11783-6 F.60)
 		/// @param[in] data The message data buffer
 		/// @param[in] managedWorkingSet The working set that sent the command
 		void handle_select_colour_map_command(const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
+		/// @brief Finds the single Working Set Special Controls object (ISO 11783-6 B.29) in a working set's
+		/// pool, or null if the pool carries none. B.29: a pool contains zero or one of these.
+		/// @param[in] managedWorkingSet The working set whose pool is searched
+		/// @returns The pool's Working Set Special Controls object, or null when it has none
+		std::shared_ptr<WorkingSetSpecialControls> find_working_set_special_controls(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &managedWorkingSet) const;
+
+		/// @brief Applies a Working Set Special Controls object's initial Colour Map and Colour Palette
+		/// selections to a working set before its pool is first rendered (ISO 11783-6 B.29: the references,
+		/// if not NULL, "are activated prior to the first rendering of the Object Pool"). A no-op when the
+		/// pool carries no Working Set Special Controls object.
+		/// @param[in] managedWorkingSet The working set whose special controls are activated
+		void apply_working_set_special_controls(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &managedWorkingSet);
 
 		/// @brief Handles a Get Attribute Value message (0xB9, F.59), replying with the requested object
 		/// attribute's value
