@@ -768,6 +768,27 @@ namespace isobus
 					versionLabel.push_back(data[i + 1]);
 				}
 
+				if ((get_version() >= VTVersion::Version6) && is_wildcard_version_label(versionLabel))
+				{
+					// E.8: a version label of a single '*' padded right with 6 blanks is a wild card that
+					// deletes ALL seven-character version object pools in NVM owned by the requesting working
+					// set, and only its own (get_versions and delete_version are both keyed by NAME).
+					// get_versions returns only the seven-character labels, so extended (32-character) versions
+					// are left alone. The feature is available at VT version 6 and later; a version-5 server
+					// falls through and treats '*'-padded as an ordinary, not-found label, byte-identical to
+					// before. E.9 byte 6 is 0 ("successfully deleted or wild card delete was commanded") even
+					// when no versions existed.
+					const NAME clientNAME = managedWorkingSet->get_control_function()->get_NAME();
+					const auto sevenCharacterVersions = get_versions(clientNAME);
+					for (const auto &label : sevenCharacterVersions)
+					{
+						delete_version(std::vector<std::uint8_t>(label.begin(), label.end()), clientNAME);
+					}
+					LOG_INFO("[VT Server]: Wild card delete removed %u seven-character object pool version(s) for client NAME %s", static_cast<unsigned>(sevenCharacterVersions.size()), nameString.str().c_str());
+					send_delete_version_response(0, managedWorkingSet->get_control_function());
+					break;
+				}
+
 				bool wasDeleted = delete_version(versionLabel, managedWorkingSet->get_control_function()->get_NAME());
 
 				if (wasDeleted)
@@ -850,7 +871,9 @@ namespace isobus
 				// ISO 11783-6 Table 5, Data-input state: a Change Numeric Value command on the object that
 				// is open for input is refused with "the object is in use" (F.23 byte 4 bit 2), leaving the
 				// open edit untouched. Only the object's own ID is guarded, not a variable it references.
-				if (is_object_open_for_input(managedWorkingSet, objectId))
+				// 4.6.10.2 deprecates this refusal for a VT-version-6 pair, where the change is accepted and
+				// applied even while the object is in use; a lower pair keeps the refusal byte-identically.
+				if (is_object_open_for_input(managedWorkingSet, objectId) && !is_version6_pair(managedWorkingSet))
 				{
 					send_change_numeric_value_response(objectId, get_bit(static_cast<std::uint8_t>(ChangeNumericValueErrorBit::ValueInUse)), value, managedWorkingSet->get_control_function());
 					LOG_WARNING("[VT Server]: Client %u change numeric value on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), objectId);
@@ -1025,7 +1048,10 @@ namespace isobus
 				// ISO 11783-6 Table 5, Data-input state: disabling the object that is open for input is
 				// refused with "operator input is active on this object" (F.5 byte 5 bit 3); the object
 				// stays enabled and keeps focus. Only a disable (byte 4 = 0) is refused -- enabling an
-				// already-enabled open object is the no-op F.4 requires to answer with no error.
+				// already-enabled open object is the no-op F.4 requires to answer with no error. This
+				// refusal is NOT version-gated: 4.6.10.2's deprecation covers the "object in use"
+				// attribute/value error family, and F.5's "input object is currently being modified" bit is
+				// a different error for a different command, still live at VT version 6.
 				if ((0 == data[3]) && is_object_open_for_input(managedWorkingSet, objectId))
 				{
 					send_enable_disable_object_response(objectId, get_bit(static_cast<std::uint8_t>(EnableDisableObjectErrorBit::CouldNotCompleteTheInputObjectIsCurrentlyBeingModified)), (0 != data[3]), managedWorkingSet->get_control_function());
@@ -1268,8 +1294,9 @@ namespace isobus
 
 				// ISO 11783-6 Table 5, Data-input state: a Change String Value command on the object that is
 				// open for input is refused with "the object is in use". At VT version 5 that is F.25 byte 6
-				// bit 4 (the bit was withdrawn in later editions; we target VT 5).
-				if (is_object_open_for_input(managedWorkingSet, objectIdToChange))
+				// bit 4 (the bit was withdrawn in later editions). 4.6.10.2 deprecates the refusal for a
+				// VT-version-6 pair, where the value change is accepted while in use; a lower pair keeps it.
+				if (is_object_open_for_input(managedWorkingSet, objectIdToChange) && !is_version6_pair(managedWorkingSet))
 				{
 					send_change_string_value_response(objectIdToChange, get_bit(static_cast<std::uint8_t>(ChangeStringValueErrorBit::ValueInUse)), message.get_source_control_function());
 					LOG_WARNING("[VT Server]: Client %u change string value on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
@@ -1499,8 +1526,11 @@ namespace isobus
 
 				// ISO 11783-6 Table 5, Data-input state: a Change Attribute command on the object that is open
 				// for input is refused with "the object is in use" (F.39 byte 5 bit 3), leaving the open edit
-				// untouched. 4.2 also protects the value being composed, so nothing is written.
-				if (is_object_open_for_input(managedWorkingSet, objectID))
+				// untouched. 4.2 also protects the value being composed, so nothing is written. 4.6.10.2
+				// deprecates this refusal for a VT-version-6 pair -- its worked example is precisely a Change
+				// Attribute (background colour) accepted while an Input Number is being edited -- so a version-6
+				// pair falls through to the normal change path; a lower pair keeps the refusal byte-identically.
+				if (is_object_open_for_input(managedWorkingSet, objectID) && !is_version6_pair(managedWorkingSet))
 				{
 					send_change_attribute_response(objectID, get_bit(static_cast<std::uint8_t>(VTObject::AttributeError::ValueInUse)), data.at(3), message.get_source_control_function());
 					LOG_WARNING("[VT Server]: Client %u change attribute %u on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), attributeID, objectID);
@@ -1673,8 +1703,9 @@ namespace isobus
 
 				// ISO 11783-6 Table 5, Data-input state: a Change List Item command on the list that is open
 				// for input is refused with "the object is in use" (F.43 byte 7 bit 3), leaving the open edit
-				// untouched.
-				if (is_object_open_for_input(managedWorkingSet, objectID))
+				// untouched. 4.6.10.2 deprecates this refusal for a VT-version-6 pair (the list item is a
+				// value/reference the clause lets a version-6 pair change while in use); a lower pair keeps it.
+				if (is_object_open_for_input(managedWorkingSet, objectID) && !is_version6_pair(managedWorkingSet))
 				{
 					send_change_list_item_response(objectID, newObjectID, get_bit(static_cast<std::uint8_t>(ChangeListItemErrorBit::ValueInUse)), listIndex, message.get_source_control_function());
 					LOG_WARNING("[VT Server]: Client %u change list item on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), objectID);
@@ -2361,7 +2392,17 @@ namespace isobus
 
 			case Function::ScreenCapture:
 			{
-				screen_capture(data[1], data[2], message.get_source_control_function());
+				// D.16 introduces Screen Capture at VT version 6; to a lower-version VT the code is
+				// unknown, and Annex C routes an unknown command byte to the Unsupported VT Function
+				// reply rather than a D.17 response.
+				if (get_version() >= VTVersion::Version6)
+				{
+					screen_capture(data[1], data[2], message.get_source_control_function());
+				}
+				else
+				{
+					send_unsupported_vt_function(data[0], message.get_source_control_function());
+				}
 			}
 			break;
 

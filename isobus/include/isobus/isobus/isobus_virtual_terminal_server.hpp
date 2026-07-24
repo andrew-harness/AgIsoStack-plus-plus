@@ -1361,6 +1361,24 @@ namespace isobus
 		/// @returns true if the working set has objectID open for input, otherwise false
 		bool is_object_open_for_input(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet, std::uint16_t objectID) const;
 
+		/// @brief Returns whether this VT and the given working set form a "VT version 6" pair.
+		/// @details ISO 11783-6 4.6.10.2 deprecates the "object in use" refusals for a version-6 pair:
+		/// "In VT version 6 and later, object attributes can be changed even if the object is 'in use'."
+		/// A behaviour keyed on both peers being version 6 gates on this: the VT itself reports version 6
+		/// (get_version()), AND the working set reported version 6 or later in its Working Set Maintenance
+		/// message. A version-5-or-prior VT, or a working set that reported a lower version, keeps the
+		/// legacy refusals byte-identically.
+		/// @param[in] workingSet The working set whose reported maintenance version is checked
+		/// @returns true if both this VT and the working set are compatible with VT version 6, otherwise false
+		bool is_version6_pair(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet) const;
+
+		/// @brief Returns whether a version label is the Delete Version wildcard: a single asterisk (0x2A)
+		/// padded right with blanks (0x20), per ISO 11783-6 E.8 (7-character labels) and E.16 (32-character
+		/// labels). The check adapts to the label length, so it recognises either form.
+		/// @param[in] versionLabel The raw version label bytes
+		/// @returns true if the label is a wildcard, otherwise false
+		static bool is_wildcard_version_label(const std::vector<std::uint8_t> &versionLabel);
+
 		/// @brief Returns the mask object a working set currently has active.
 		/// @details This is safe to call for a working set other than the one being served. It takes one
 		/// snapshot of that working set's object tree and resolves both the Working Set object and the

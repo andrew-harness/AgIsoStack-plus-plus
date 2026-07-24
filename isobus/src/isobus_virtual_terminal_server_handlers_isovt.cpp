@@ -63,6 +63,43 @@ namespace isobus
 		return static_cast<std::uint16_t>(lowByte | static_cast<std::uint16_t>(highByte << 8));
 	}
 
+	bool VirtualTerminalServer::is_version6_pair(const std::shared_ptr<VirtualTerminalServerManagedWorkingSet> &workingSet) const
+	{
+		if (nullptr == workingSet)
+		{
+			return false;
+		}
+
+		// ISO 11783-6 4.6.10.2: the "object in use" refusals are deprecated only for a version-6 pair --
+		// this VT reports version 6, AND the working set reported version 6 or later in its Working Set
+		// Maintenance message. Anything lower keeps the legacy refusals byte-identically. G.3 defines
+		// 0xFF as "Compliant with VT Version 2 and prior" (and it is the stored default before any
+		// maintenance frame is processed), so the raw byte must not win a >= comparison: 0xFF is the
+		// LOWEST version, not the highest.
+		const std::uint8_t workingSetVersion = workingSet->get_working_set_maintenance_version();
+		return (get_version() >= VTVersion::Version6) &&
+		  (workingSetVersion >= 6) &&
+		  (0xFFu != workingSetVersion);
+	}
+
+	bool VirtualTerminalServer::is_wildcard_version_label(const std::vector<std::uint8_t> &versionLabel)
+	{
+		// ISO 11783-6 E.8 / E.16: a single asterisk (0x2A) padded right with blanks (0x20). The label's
+		// length distinguishes the seven-character and extended forms; either shape is a wildcard.
+		if (versionLabel.empty() || (0x2Au != versionLabel[0]))
+		{
+			return false;
+		}
+		for (std::size_t i = 1; i < versionLabel.size(); i++)
+		{
+			if (0x20u != versionLabel[i])
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
 	void VirtualTerminalServer::execute_operator_event_macros(std::shared_ptr<VirtualTerminalServerManagedWorkingSet> workingSet, std::uint16_t objectID, EventID event)
 	{
 		if (nullptr == workingSet)
@@ -237,15 +274,39 @@ namespace isobus
 			versionLabel.push_back(data[i + 1]);
 		}
 
-		bool wasDeleted = delete_version(versionLabel, managedWorkingSet->get_control_function()->get_NAME());
+		std::uint8_t errorByte;
 
-		if (wasDeleted)
+		if ((get_version() >= VTVersion::Version6) && is_wildcard_version_label(versionLabel))
 		{
-			LOG_INFO("[VT Server]: Deleted an extended object pool version for client NAME %s", nameString.str().c_str());
+			// E.16: a version label of a single '*' padded right with 31 blanks is a wild card that deletes
+			// ALL extended (32-character) version object pools in NVM owned by the requesting working set,
+			// and only its own. get_extended_versions returns only the 32-character labels, so
+			// seven-character versions are left alone. The feature is available at VT version 6 and later; a
+			// version-5 server falls through and treats the label as an ordinary, not-found one. E.17 byte 6
+			// is 0 ("successfully deleted or wild card delete was commanded") even when no versions existed.
+			const NAME clientNAME = managedWorkingSet->get_control_function()->get_NAME();
+			const auto extendedVersions = get_extended_versions(clientNAME);
+			for (const auto &label : extendedVersions)
+			{
+				delete_version(std::vector<std::uint8_t>(label.begin(), label.end()), clientNAME);
+			}
+			LOG_INFO("[VT Server]: Wild card delete removed %u extended object pool version(s) for client NAME %s", static_cast<unsigned>(extendedVersions.size()), nameString.str().c_str());
+			errorByte = 0;
 		}
 		else
 		{
-			LOG_WARNING("[VT Server]: Extended delete version failed for client NAME %s", nameString.str().c_str());
+			const bool wasDeleted = delete_version(versionLabel, managedWorkingSet->get_control_function()->get_NAME());
+
+			if (wasDeleted)
+			{
+				LOG_INFO("[VT Server]: Deleted an extended object pool version for client NAME %s", nameString.str().c_str());
+				errorByte = 0;
+			}
+			else
+			{
+				LOG_WARNING("[VT Server]: Extended delete version failed for client NAME %s", nameString.str().c_str());
+				errorByte = get_bit(static_cast<std::uint8_t>(DeleteVersionErrorBit::VersionLabelNotCorrectOrUnknown));
+			}
 		}
 
 		const std::array<std::uint8_t, CAN_DATA_LENGTH> buffer = {
@@ -254,7 +315,7 @@ namespace isobus
 			0xFF, // Reserved
 			0xFF, // Reserved
 			0xFF, // Reserved
-			static_cast<std::uint8_t>(wasDeleted ? 0 : get_bit(static_cast<std::uint8_t>(DeleteVersionErrorBit::VersionLabelNotCorrectOrUnknown))),
+			errorByte,
 			0xFF, // Reserved
 			0xFF // Reserved
 		};
