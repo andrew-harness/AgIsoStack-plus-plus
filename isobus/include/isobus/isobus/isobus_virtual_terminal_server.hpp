@@ -1459,6 +1459,12 @@ namespace isobus
 		/// @brief Recomputes which working set the VT displays (ISO 11783-6 clause 4.6.14) and switches
 		/// to it when it differs from the current one, then raises the Alarm Mask displayed event if the
 		/// resulting mask is an Alarm Mask that was not already on screen.
+		/// @details A change of screen ownership ENQUEUES the four macro events Table B.1 allocates to it
+		/// -- On activate and On deactivate on the two Working Set objects, On hide and On show on the two
+		/// active masks -- so EVERY CALLER MUST END WITH drain_macro_execution_queue(). Draining inside
+		/// this function instead would run those macros before a caller that raises its own events around
+		/// it had queued them, inverting 4.6.11.4 c) (macros execute in the order they were triggered).
+		/// A drain on an empty queue is a no-op, so the call is unconditional at every call site.
 		void apply_active_working_set_arbitration();
 
 		/// @brief Raises the repaint event for a working set unless that working set has its visible mask

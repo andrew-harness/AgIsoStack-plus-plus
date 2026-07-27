@@ -1242,12 +1242,10 @@ namespace isobus
 				{
 					if (newActiveMaskObjectIsValid)
 					{
-						// Table B.3's On Hide row is caused by "the active mask changed for the Working Set",
-						// and a mask can only be removed from a display it was on, so the hide event below is
-						// gated on who owned the screen BEFORE this command. It is captured here, ahead of the
-						// first side effect, because apply_active_working_set_arbitration further down can hand
-						// the screen to another working set. The show event's gate is the mirror image and is
-						// read after that arbitration instead -- see where it is used.
+						// Who owned the screen BEFORE this command. Captured here, ahead of the first side
+						// effect, because apply_active_working_set_arbitration further down can hand the
+						// screen to another working set. This is one half of the mask events' gate; the other
+						// half is the screen owner AFTER that arbitration -- see where the two are combined.
 						const bool workingSetWasDisplayed = (activeWorkingSet == managedWorkingSet);
 						const std::uint16_t oldActiveMaskObjectId = std::static_pointer_cast<WorkingSet>(workingSetObject)->get_active_mask();
 						std::static_pointer_cast<WorkingSet>(workingSetObject)->set_active_mask(newActiveMaskObjectId);
@@ -1301,6 +1299,25 @@ namespace isobus
 						}
 						send_change_active_mask_response(newActiveMaskObjectId, 0, managedWorkingSet->get_control_function());
 
+						// ISO 11783-6 Table B.1, the On Change Active Mask row: "Change the active mask
+						// attribute. If this Working Set is active, then perform a hide event on the current
+						// active mask and a show event on the new active mask." Event 7 fires on the WORKING
+						// SET object the command names -- B.1 is the Working Set object's own event table --
+						// and events 4 and 3 fire on the old and the new mask, hide before show, queued
+						// below where their gate can be read.
+						//
+						// Event 7's trigger is the command itself (Table A.3, "Event occurs when: Change
+						// Active Mask command."), so it fires on every success. All the events triggered by
+						// this one command are QUEUED before any of them runs and the queue is drained once.
+						// Draining per event would run everything event 7's macros trigger in turn before the
+						// hide was even queued, which inverts 4.6.11.4 c) (macros execute in the order they
+						// were triggered) and would let a macro that retargets the active mask leave the show
+						// firing on a mask that is no longer the new one. Event 7 is queued AHEAD of the
+						// arbitration, which enqueues Table B.1's activation events without draining, so the
+						// event the command is named for precedes them -- the same intra-command order the
+						// Change Priority command uses for its event 17.
+						enqueue_macros(workingSetObject, EventID::OnChangeActiveMask, VirtualTerminalObjectType::WorkingSet, managedWorkingSet);
+
 						// A mask change can move the screen between working sets under the priority rules of
 						// 4.6.14, so which working set is displayed is recomputed rather than left with whoever
 						// held it. The arbitration also refreshes the status' visible-mask fields (G.2 bytes
@@ -1314,63 +1331,46 @@ namespace isobus
 						dispatch_repaint(managedWorkingSet);
 						onChangeActiveMaskEventDispatcher.call(managedWorkingSet, workingSetObjectId, newActiveMaskObjectId);
 
-						// ISO 11783-6 Table B.1, the On Change Active Mask row: "Change the active mask
-						// attribute. If this Working Set is active, then perform a hide event on the current
-						// active mask and a show event on the new active mask." Event 7 fires on the WORKING
-						// SET object the command names -- B.1 is the Working Set object's own event table --
-						// and events 4 and 3 fire on the old and the new mask, hide before show.
-						//
-						// Event 7's trigger is the command itself (Table A.3, "Event occurs when: Change
-						// Active Mask command."), so it fires on every success. The mask events are triggered
-						// by a change of visible state instead, and Table B.3 states each side separately:
-						// On Hide is caused by "the active mask changed for the Working Set", which requires
-						// the mask to have been on a display this working set owned; On Show is caused by
-						// "BOTH the Data Mask and its Working Set becoming active", so it asks whether the new
-						// mask is on the display once this command has settled. Those are different moments,
-						// which is why the two gates read the screen owner at different points -- the
-						// arbitration between them can promote a background working set whose new mask is an
-						// Alarm Mask, or displace this one. Both mask events additionally require the mask to
-						// have actually changed: a client that re-selects the mask it already has -- the
-						// refresh idiom the mask-lock release above also special-cases -- removes nothing from
-						// the display and makes nothing visible.
-						//
-						// All three events are triggered by this one command, so all three are QUEUED before
-						// any of them runs and the queue is drained once. Draining per event would run
-						// everything event 7's macros trigger in turn before the hide was even queued, which
-						// inverts 4.6.11.4 c) (macros execute in the order they were triggered) and would let
-						// a macro that retargets the active mask leave the show firing on a mask that is no
-						// longer the new one.
-						enqueue_macros(workingSetObject, EventID::OnChangeActiveMask, VirtualTerminalObjectType::WorkingSet, managedWorkingSet);
-
-						if (newActiveMaskObjectId != oldActiveMaskObjectId)
+						// The mask events are triggered by a change of visible state rather than by the
+						// command -- Table B.3: On Hide is caused by "the active mask changed for the Working
+						// Set", On Show by "both the Data Mask and its Working Set becoming active" -- and
+						// this command owns them only while this working set holds the screen BOTH before and
+						// after the arbitration above. When ownership changes instead, the same screen is
+						// covered by the four events Table B.1 allocates to activation -- On deactivate and a
+						// hide on the outgoing working set, On activate and a show on the incoming one --
+						// which the arbitration itself raises, so this command must not raise them a second
+						// time. Without both halves of the gate, a background working set that changes its
+						// active mask to an Alarm Mask (promoted onto the screen by the arbitration) would
+						// have a show fired twice on the same object. The mask events additionally require
+						// the mask to have actually changed: a client that re-selects the mask it already has
+						// -- the refresh idiom the mask-lock release above also special-cases -- removes
+						// nothing from the display and makes nothing visible.
+						if (workingSetWasDisplayed && (activeWorkingSet == managedWorkingSet) &&
+						    (newActiveMaskObjectId != oldActiveMaskObjectId))
 						{
-							if (workingSetWasDisplayed)
-							{
-								// Resolved against the same snapshot the rest of this case uses, for the reason
-								// given where that snapshot was taken. The old mask ID can legitimately be
-								// NULL_OBJECT_ID -- a Working Set may name no active mask -- which resolves to
-								// nothing and leaves only the show event. The mask-type test is what keeps
-								// events 3 and 4 bound to mask objects: enqueue_macros' own guard compares the
-								// type passed to the object's own type, so passing the object's type always
-								// matches and cannot stand in for this check.
-								const auto oldActiveMaskObject = VTObject::get_object_by_id(oldActiveMaskObjectId, *objectTree);
+							// Resolved against the same snapshot the rest of this case uses, for the reason
+							// given where that snapshot was taken. The old mask ID can legitimately be
+							// NULL_OBJECT_ID -- a Working Set may name no active mask -- which resolves to
+							// nothing and leaves only the show event. The mask-type test is what keeps
+							// events 3 and 4 bound to mask objects: enqueue_macros' own guard compares the
+							// type passed to the object's own type, so passing the object's type always
+							// matches and cannot stand in for this check.
+							const auto oldActiveMaskObject = VTObject::get_object_by_id(oldActiveMaskObjectId, *objectTree);
 
-								if ((nullptr != oldActiveMaskObject) &&
-								    ((VirtualTerminalObjectType::DataMask == oldActiveMaskObject->get_object_type()) ||
-								     (VirtualTerminalObjectType::AlarmMask == oldActiveMaskObject->get_object_type())))
-								{
-									enqueue_macros(oldActiveMaskObject, EventID::OnHide, oldActiveMaskObject->get_object_type(), managedWorkingSet);
-								}
+							if ((nullptr != oldActiveMaskObject) &&
+							    ((VirtualTerminalObjectType::DataMask == oldActiveMaskObject->get_object_type()) ||
+							     (VirtualTerminalObjectType::AlarmMask == oldActiveMaskObject->get_object_type())))
+							{
+								enqueue_macros(oldActiveMaskObject, EventID::OnHide, oldActiveMaskObject->get_object_type(), managedWorkingSet);
 							}
 
-							// Read after the arbitration above, which is what settles B.3's "and its Working
-							// Set becoming active" half. newActiveMaskObject was validated above as a Data Mask
-							// or an Alarm Mask, so it needs no further type check.
-							if (activeWorkingSet == managedWorkingSet)
-							{
-								enqueue_macros(newActiveMaskObject, EventID::OnShow, newActiveMaskObject->get_object_type(), managedWorkingSet);
-							}
+							// newActiveMaskObject was validated above as a Data Mask or an Alarm Mask, so it
+							// needs no further type check.
+							enqueue_macros(newActiveMaskObject, EventID::OnShow, newActiveMaskObject->get_object_type(), managedWorkingSet);
 						}
+
+						// The single drain for everything this command queued, the arbitration's activation
+						// events included -- the arbitration enqueues without draining for exactly that.
 						drain_macro_execution_queue();
 						LOG_DEBUG("[VT Server]: Client %u changed active mask to object %u for working set object %u", managedWorkingSet->get_control_function()->get_address(), newActiveMaskObjectId, workingSetObjectId);
 					}
@@ -1661,8 +1661,8 @@ namespace isobus
 					const std::uint16_t oldActiveMaskObjectId = retargetsWorkingSetActiveMask ?
 					  std::static_pointer_cast<WorkingSet>(targetObject)->get_active_mask() :
 					  NULL_OBJECT_ID;
-					// Table B.3's On Hide gate, captured before any side effect for the reason the Change
-					// Active Mask case gives at its own capture.
+					// Half of the mask events' gate, captured before any side effect for the reason the
+					// Change Active Mask case gives at its own capture.
 					const bool workingSetWasDisplayed = (activeWorkingSet == managedWorkingSet);
 
 					if (targetObject->set_attribute(attributeID, attributeData, *objectTree, errorCode)) // 0 Is always the read-only "type" attribute
@@ -1705,6 +1705,14 @@ namespace isobus
 						send_change_attribute_response(objectID, 0, data.at(3), message.get_source_control_function());
 						LOG_DEBUG("[VT Server]: Client %u changed object %u attribute %u to %u", managedWorkingSet->get_control_function()->get_address(), objectID, attributeID, attributeData);
 
+						// Table A.3 event 9 for the command itself, queued ahead of the arbitration below so
+						// the event the command is named for precedes the activation events that arbitration
+						// enqueues -- the same intra-command order the Change Active Mask and Change Priority
+						// commands use. Event 7 is NOT raised here -- Table A.3 names the Change Active Mask
+						// COMMAND as its trigger, and this is not that command. Gates, ordering and the
+						// single drain are as the Change Active Mask case documents them.
+						enqueue_macros(targetObject, EventID::OnChangeAttribute, targetObject->get_object_type(), managedWorkingSet);
+
 						// Change Attribute reaches the same state the dedicated commands do, including both keys
 						// 4.6.14 ranks alarms by: attribute 3 on a Working Set retargets the active mask, exactly as
 						// Change Active Mask does, and attribute 3 on an Alarm Mask sets its priority, exactly as
@@ -1715,28 +1723,23 @@ namespace isobus
 						apply_active_working_set_arbitration();
 						dispatch_repaint(managedWorkingSet);
 
-						// Table A.3 event 9 for the command itself. The mask events follow it because a
-						// retarget of attribute 3 is the same change of visible state a Change Active Mask
-						// command makes, and Table B.3 phrases both mask events on that state rather than on
-						// a command: On Hide is caused by "the active mask changed for the Working Set", On
-						// Show by "both the Data Mask and its Working Set becoming active". Event 7 is NOT
-						// among them -- Table A.3 names the Change Active Mask COMMAND as its trigger, and
-						// this is not that command. Gates, ordering and the single drain are as the Change
+						// The mask events follow the arbitration because a retarget of attribute 3 is the
+						// same change of visible state a Change Active Mask command makes, and Table B.3
+						// phrases both mask events on that state rather than on a command: On Hide is caused
+						// by "the active mask changed for the Working Set", On Show by "both the Data Mask
+						// and its Working Set becoming active". Both halves of the gate are as the Change
 						// Active Mask case documents them.
-						enqueue_macros(targetObject, EventID::OnChangeAttribute, targetObject->get_object_type(), managedWorkingSet);
-
-						if (retargetsWorkingSetActiveMask && (newActiveMaskObjectId != oldActiveMaskObjectId))
+						if (retargetsWorkingSetActiveMask &&
+						    workingSetWasDisplayed && (activeWorkingSet == managedWorkingSet) &&
+						    (newActiveMaskObjectId != oldActiveMaskObjectId))
 						{
-							if (workingSetWasDisplayed)
-							{
-								const auto oldActiveMaskObject = VTObject::get_object_by_id(oldActiveMaskObjectId, *objectTree);
+							const auto oldActiveMaskObject = VTObject::get_object_by_id(oldActiveMaskObjectId, *objectTree);
 
-								if ((nullptr != oldActiveMaskObject) &&
-								    ((VirtualTerminalObjectType::DataMask == oldActiveMaskObject->get_object_type()) ||
-								     (VirtualTerminalObjectType::AlarmMask == oldActiveMaskObject->get_object_type())))
-								{
-									enqueue_macros(oldActiveMaskObject, EventID::OnHide, oldActiveMaskObject->get_object_type(), managedWorkingSet);
-								}
+							if ((nullptr != oldActiveMaskObject) &&
+							    ((VirtualTerminalObjectType::DataMask == oldActiveMaskObject->get_object_type()) ||
+							     (VirtualTerminalObjectType::AlarmMask == oldActiveMaskObject->get_object_type())))
+							{
+								enqueue_macros(oldActiveMaskObject, EventID::OnHide, oldActiveMaskObject->get_object_type(), managedWorkingSet);
 							}
 
 							// Unlike the Change Active Mask command, this path validated no mask type: carry
@@ -1746,14 +1749,16 @@ namespace isobus
 							// in another case.
 							const auto newActiveMaskObject = VTObject::get_object_by_id(newActiveMaskObjectId, *objectTree);
 
-							if ((activeWorkingSet == managedWorkingSet) &&
-							    (nullptr != newActiveMaskObject) &&
+							if ((nullptr != newActiveMaskObject) &&
 							    ((VirtualTerminalObjectType::DataMask == newActiveMaskObject->get_object_type()) ||
 							     (VirtualTerminalObjectType::AlarmMask == newActiveMaskObject->get_object_type())))
 							{
 								enqueue_macros(newActiveMaskObject, EventID::OnShow, newActiveMaskObject->get_object_type(), managedWorkingSet);
 							}
 						}
+
+						// The single drain for everything this command queued, the arbitration's activation
+						// events included -- the arbitration enqueues without draining for exactly that.
 						drain_macro_execution_queue();
 					}
 					else
@@ -2175,11 +2180,17 @@ namespace isobus
 							std::static_pointer_cast<AlarmMask>(targetObject)->set_mask_priority(static_cast<AlarmMask::Priority>(newPriority));
 							send_change_priority_response(objectID, 0, newPriority, message.get_source_control_function());
 							LOG_DEBUG("[VT Server]: Client %u change priority command: New Priority %u", managedWorkingSet->get_control_function()->get_address(), newPriority);
-							process_macro(targetObject, EventID::OnChangePriority, VirtualTerminalObjectType::AlarmMask, managedWorkingSet);
+
+							// Table A.3 event 17 for the command itself, ENQUEUED rather than run, because the
+							// arbitration below can raise the activation events of Table B.1 from the same
+							// command. Everything one command triggers is queued before any of it runs and the
+							// queue is drained once, which is 4.6.11.4 c)'s trigger order.
+							enqueue_macros(targetObject, EventID::OnChangePriority, VirtualTerminalObjectType::AlarmMask, managedWorkingSet);
 
 							// The priority attribute is the first key 4.6.14 ranks alarms by, so changing it can
 							// reorder which working set's alarm belongs on screen.
 							apply_active_working_set_arbitration();
+							drain_macro_execution_queue();
 						}
 						else
 						{
@@ -2456,7 +2467,10 @@ namespace isobus
 					// A working set with no pool resolves no active mask and so cannot be selected, which
 					// makes this hand the display to whichever survivor 4.6.14 ranks highest. Without it
 					// the screen stays blank until some other working set happens to change its mask.
+					// The survivor promoted here is made active, so the drain runs the activation events
+					// the arbitration queued (its declaration states the contract).
 					apply_active_working_set_arbitration();
+					drain_macro_execution_queue();
 				}
 				else
 				{
@@ -3513,8 +3527,22 @@ namespace isobus
 				// covers the two cases the plain adopt used to handle: with no alarms anywhere the first
 				// working set to present a usable pool takes the screen and keeps it, and a runtime object
 				// pool update on the active working set refreshes the status' visible-mask fields, which
-				// that update can retarget.
+				// that update can retarget. A pool that takes the screen here raises Table B.1's
+				// activation events, so the queue the arbitration filled is drained (its declaration
+				// states the contract).
+				//
+				// A completed parse is a fresh 4.6.11.4 trigger and not a bus command, so it resets the
+				// execution budget itself, exactly as execute_operator_event_macros does. Without the
+				// reset a budget left exhausted by an earlier command would discard these activation
+				// macros silently.
+				if (0 == macroExecutionDepth)
+				{
+					macroExecutionsThisCommand = 0;
+					macroExecutionBudgetExhausted = false;
+				}
+
 				apply_active_working_set_arbitration();
+				drain_macro_execution_queue();
 			}
 			else if (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Fail == ws->get_object_pool_processing_state())
 			{
@@ -3561,10 +3589,23 @@ namespace isobus
 		// working sets are out of the list, 4.6.14 is re-run over the survivors, which promotes the next
 		// highest priority alarm or, with no alarm anywhere, the working set that last had a Data Mask
 		// visible. This runs after the erase loop so the arbitration cannot select a working set that is
-		// on its way out.
+		// on its way out. The promoted survivor raises Table B.1's activation events; the departed
+		// working set raises none, because it is no longer managed. The drain honours the contract at
+		// the arbitration's declaration.
+		//
+		// A teardown is a fresh 4.6.11.4 trigger and not a bus command, so it resets the execution
+		// budget itself, exactly as execute_operator_event_macros does. Without the reset a budget left
+		// exhausted by an earlier command would discard these activation macros silently.
 		if (workingSetWasTornDown)
 		{
+			if (0 == macroExecutionDepth)
+			{
+				macroExecutionsThisCommand = 0;
+				macroExecutionBudgetExhausted = false;
+			}
+
 			apply_active_working_set_arbitration();
+			drain_macro_execution_queue();
 		}
 	}
 }

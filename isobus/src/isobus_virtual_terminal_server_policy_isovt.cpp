@@ -56,7 +56,26 @@ namespace isobus
 		// through the arbitration rather than assigning activeWorkingSet directly is what subordinates
 		// the choice to clause 4.6.14: with an alarm raised the screen does not move, and the choice is
 		// remembered for when that alarm clears.
+		//
+		// A selection that does move the screen raises Table B.1's activation events on both working
+		// sets, which the arbitration enqueues and this drains, per the contract at its declaration.
+		//
+		// The 4.6.11.4 execution budget is reset here the way execute_operator_event_macros resets it:
+		// this is not reached through process_rx_message, so without the reset a budget left exhausted
+		// by some earlier command would discard every activation macro silently (the first execute_macro
+		// returns at once and the drain then clears the queue). Two callers reach this -- the operator's
+		// own selection, a fresh trigger and the reason the reset belongs here, and the Select Active
+		// Working Set command 0x90, which is a bus command and therefore gets a second allotment on top
+		// of the one process_rx_message gave it. That is bounded (one extra allotment for one command)
+		// and deliberate.
+		if (0 == macroExecutionDepth)
+		{
+			macroExecutionsThisCommand = 0;
+			macroExecutionBudgetExhausted = false;
+		}
+
 		apply_active_working_set_arbitration();
+		drain_macro_execution_queue();
 	}
 
 	bool VirtualTerminalServer::active_working_set_candidate_outranks(const ActiveWorkingSetCandidate &candidate,
@@ -537,6 +556,15 @@ namespace isobus
 			    (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Running == activeState) ||
 			    (VirtualTerminalServerManagedWorkingSet::ObjectPoolProcessingThreadState::Fail == activeState))
 			{
+				// The displayed-mask fields still have to follow the display on this path. The incumbent
+				// keeps the screen but its mask can change while it is here -- a Change Active Mask during
+				// a runtime pool update renders the new mask and returns through this branch -- and those
+				// fields are both Annex G.2's visible-mask bytes 3-4 and, on a later pass, the record of
+				// which mask a displaced working set's hide event belongs to. Refreshing on the way out
+				// rather than at the top of this function is what keeps that record honest: a command
+				// writes the active-mask attribute BEFORE it arbitrates, so a refresh taken on entry would
+				// report the incoming mask as though it were already the one on screen.
+				refresh_active_mask_status_fields();
 				return;
 			}
 		}
@@ -549,6 +577,15 @@ namespace isobus
 			// The working set losing the screen, captured before the reassignment below overwrites it,
 			// so its open input can be closed the way a mask change closes one.
 			auto displacedWorkingSet = activeWorkingSet;
+
+			// The mask the VT reports as being ON THE DISPLAY, captured before the reassignment below and
+			// before the null-selection branch clears it. The refresh at the top of this function has
+			// just established it against the working set that is about to be displaced, so it names the
+			// mask the operator is looking at. That is the mask the outgoing working set's hide event
+			// belongs to -- see where it is used for why its active-mask attribute cannot answer that
+			// question. (The other writers of this member are the null-selection branch below and the
+			// 4.6.9 teardown, both of which run only where there is no displaced mask to name.)
+			const std::uint16_t displayedMaskObjectIdOnEntry = activeWorkingSetDataMaskObjectID;
 
 			activeWorkingSet = selectedWorkingSet;
 			activeWorkingSetMasterAddress = ((nullptr != selectedWorkingSet) && (nullptr != selectedWorkingSet->get_control_function())) ?
@@ -585,10 +622,10 @@ namespace isobus
 			// before this function runs (the same handler, carry 0058, ahead of its arbitration call),
 			// so a mask change never double-sends here for the working set that issued it; this only
 			// closes the DIFFERENT working set the arbitration displaces.
+			bool displacedStillManaged = false;
+
 			if (nullptr != displacedWorkingSet)
 			{
-				bool displacedStillManaged = false;
-
 				for (const auto &ws : managedWorkingSetList)
 				{
 					if (ws == displacedWorkingSet)
@@ -614,6 +651,109 @@ namespace isobus
 						send_select_input_object_message(displacedWorkingSet->get_object_focus(), false, false, displacedWorkingSet->get_control_function());
 						displacedWorkingSet->set_object_focus(NULL_OBJECT_ID);
 					}
+				}
+			}
+
+			// ISO 11783-6 Table A.3 events 1 On activate ("Working Set is made active.") and 2 On
+			// deactivate ("Working Set is made inactive."), plus the mask events Table B.1 binds to them.
+			// A change of screen ownership is the only thing that makes either working set active or
+			// inactive, and this is the only place activeWorkingSet is assigned a non-null value, so all
+			// four are raised
+			// here whatever moved the screen -- 4.6.14 alarm arbitration, the operator's selection
+			// (clause 4.6.8), a newly parsed pool, a pool deletion or a working-set teardown.
+			//
+			// Table B.1's Working Set event table allocates the four and states their order. Its On
+			// Activate row's VT behaviour is "Deactivate event on current Working Set object. Show event
+			// on the active Data Mask of this Working Set object (assuming no alarms)."; its On
+			// Deactivate row's is "Hide event on active Data Mask of this Working Set." Expanding the
+			// activate row through the deactivate row it names gives activate, deactivate, hide, show --
+			// which is also the hide-before-show order the mask-change commands use, and Table B.3's own
+			// account of the same two events (On Show caused by "both the Data Mask and its Working Set
+			// becoming active", On Hide by "either the active mask changed for the Working Set or the
+			// Working Set being deactivated").
+			//
+			// B.1 names the "active Data Mask", but the mask that actually enters or leaves the screen is
+			// the working set's active mask whatever its type: with an alarm raised that IS an Alarm
+			// Mask, which is what B.1's "(assuming no alarms)" parenthetical acknowledges -- the Data
+			// Mask is then not the thing shown. A working set whose pool cannot be presented resolves no
+			// mask at all, and raises its Working Set event alone.
+			//
+			// Both events of the OUTGOING working set are gated on displacedStillManaged for the reason
+			// given where that flag is computed: a working set erased by the loss teardown is gone, and
+			// no macro may run in its name.
+			//
+			// These are ENQUEUED, not drained. Several callers raise their own events around this
+			// function -- the Change Priority command's event 17, the mask-change commands' events 7/9
+			// and 3/4 -- so a drain here would run this batch before theirs was queued, which inverts
+			// 4.6.11.4 c). Every caller drains once when its command is complete; see this function's
+			// declaration.
+			if (nullptr != selectedWorkingSet)
+			{
+				enqueue_macros(selectedWorkingSet->get_working_set_object(), EventID::OnActivate, VirtualTerminalObjectType::WorkingSet, selectedWorkingSet);
+			}
+
+			if (displacedStillManaged)
+			{
+				enqueue_macros(displacedWorkingSet->get_working_set_object(), EventID::OnDeactivate, VirtualTerminalObjectType::WorkingSet, displacedWorkingSet);
+
+				// The hide names the mask that was ON THE DISPLAY, which is displayedMaskObjectIdOnEntry
+				// and NOT whatever the displaced working set's active-mask attribute currently reads.
+				// Table A.3 event 4 is defined as firing "when the mask is removed from the display", and
+				// Table B.3's On Hide cause is "the active mask changed for the Working Set" -- both name
+				// the mask the operator was looking at. The attribute is the wrong source for it because a
+				// Change Active Mask command (or a Change Attribute on attribute 3) writes that attribute
+				// and THEN calls this function from the same command: by the time the displacement is
+				// decided, the attribute already names the incoming mask, which was never on the display,
+				// while the mask that actually left it survives only in the ID captured on entry.
+				//
+				// NULL_OBJECT_ID means no mask was ever reported visible for this working set -- it never
+				// reached the status fields -- so the attribute is the only thing left to name and
+				// get_active_mask_object answers it, reporting nothing for a pool that cannot be
+				// presented.
+				//
+				// The tree snapshot is bound to a named local first: get_object_tree() returns a
+				// shared_ptr BY VALUE, so passing *displacedWorkingSet->get_object_tree() straight into
+				// the lookup would bind a reference to a temporary that dies at the end of the full
+				// expression.
+				std::shared_ptr<VTObject> displacedMaskObject;
+
+				if (NULL_OBJECT_ID != displayedMaskObjectIdOnEntry)
+				{
+					const auto displacedObjectTree = displacedWorkingSet->get_object_tree();
+
+					displacedMaskObject = VTObject::get_object_by_id(displayedMaskObjectIdOnEntry, *displacedObjectTree);
+				}
+				else
+				{
+					displacedMaskObject = get_active_mask_object(displacedWorkingSet);
+				}
+
+				// Nothing validates a Working Set's active-mask reference at parse time, and
+				// get_active_mask_object performs no type test either, so a malformed pool can name a
+				// Container as its active mask. Events 3 and 4 are allocated to masks by Table B.3, so
+				// the type is tested here: enqueue_macros' own guard compares the type passed to the
+				// object's own type, so passing the object's type always matches and cannot stand in for
+				// this check.
+				if ((nullptr != displacedMaskObject) &&
+				    ((VirtualTerminalObjectType::DataMask == displacedMaskObject->get_object_type()) ||
+				     (VirtualTerminalObjectType::AlarmMask == displacedMaskObject->get_object_type())))
+				{
+					enqueue_macros(displacedMaskObject, EventID::OnHide, displacedMaskObject->get_object_type(), displacedWorkingSet);
+				}
+			}
+
+			if (nullptr != selectedWorkingSet)
+			{
+				// The incoming working set has not been displayed yet, so its active-mask attribute IS
+				// the mask about to appear and get_active_mask_object is the right source here. The
+				// mask-type test is the same guard the hide above applies, and for the same reason.
+				const auto selectedMaskObject = get_active_mask_object(selectedWorkingSet);
+
+				if ((nullptr != selectedMaskObject) &&
+				    ((VirtualTerminalObjectType::DataMask == selectedMaskObject->get_object_type()) ||
+				     (VirtualTerminalObjectType::AlarmMask == selectedMaskObject->get_object_type())))
+				{
+					enqueue_macros(selectedMaskObject, EventID::OnShow, selectedMaskObject->get_object_type(), selectedWorkingSet);
 				}
 			}
 		}
