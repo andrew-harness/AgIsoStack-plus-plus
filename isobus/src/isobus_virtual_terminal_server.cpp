@@ -1242,6 +1242,13 @@ namespace isobus
 				{
 					if (newActiveMaskObjectIsValid)
 					{
+						// Table B.3's On Hide row is caused by "the active mask changed for the Working Set",
+						// and a mask can only be removed from a display it was on, so the hide event below is
+						// gated on who owned the screen BEFORE this command. It is captured here, ahead of the
+						// first side effect, because apply_active_working_set_arbitration further down can hand
+						// the screen to another working set. The show event's gate is the mirror image and is
+						// read after that arbitration instead -- see where it is used.
+						const bool workingSetWasDisplayed = (activeWorkingSet == managedWorkingSet);
 						const std::uint16_t oldActiveMaskObjectId = std::static_pointer_cast<WorkingSet>(workingSetObject)->get_active_mask();
 						std::static_pointer_cast<WorkingSet>(workingSetObject)->set_active_mask(newActiveMaskObjectId);
 
@@ -1306,6 +1313,65 @@ namespace isobus
 						// withholds the refresh.
 						dispatch_repaint(managedWorkingSet);
 						onChangeActiveMaskEventDispatcher.call(managedWorkingSet, workingSetObjectId, newActiveMaskObjectId);
+
+						// ISO 11783-6 Table B.1, the On Change Active Mask row: "Change the active mask
+						// attribute. If this Working Set is active, then perform a hide event on the current
+						// active mask and a show event on the new active mask." Event 7 fires on the WORKING
+						// SET object the command names -- B.1 is the Working Set object's own event table --
+						// and events 4 and 3 fire on the old and the new mask, hide before show.
+						//
+						// Event 7's trigger is the command itself (Table A.3, "Event occurs when: Change
+						// Active Mask command."), so it fires on every success. The mask events are triggered
+						// by a change of visible state instead, and Table B.3 states each side separately:
+						// On Hide is caused by "the active mask changed for the Working Set", which requires
+						// the mask to have been on a display this working set owned; On Show is caused by
+						// "BOTH the Data Mask and its Working Set becoming active", so it asks whether the new
+						// mask is on the display once this command has settled. Those are different moments,
+						// which is why the two gates read the screen owner at different points -- the
+						// arbitration between them can promote a background working set whose new mask is an
+						// Alarm Mask, or displace this one. Both mask events additionally require the mask to
+						// have actually changed: a client that re-selects the mask it already has -- the
+						// refresh idiom the mask-lock release above also special-cases -- removes nothing from
+						// the display and makes nothing visible.
+						//
+						// All three events are triggered by this one command, so all three are QUEUED before
+						// any of them runs and the queue is drained once. Draining per event would run
+						// everything event 7's macros trigger in turn before the hide was even queued, which
+						// inverts 4.6.11.4 c) (macros execute in the order they were triggered) and would let
+						// a macro that retargets the active mask leave the show firing on a mask that is no
+						// longer the new one.
+						enqueue_macros(workingSetObject, EventID::OnChangeActiveMask, VirtualTerminalObjectType::WorkingSet, managedWorkingSet);
+
+						if (newActiveMaskObjectId != oldActiveMaskObjectId)
+						{
+							if (workingSetWasDisplayed)
+							{
+								// Resolved against the same snapshot the rest of this case uses, for the reason
+								// given where that snapshot was taken. The old mask ID can legitimately be
+								// NULL_OBJECT_ID -- a Working Set may name no active mask -- which resolves to
+								// nothing and leaves only the show event. The mask-type test is what keeps
+								// events 3 and 4 bound to mask objects: enqueue_macros' own guard compares the
+								// type passed to the object's own type, so passing the object's type always
+								// matches and cannot stand in for this check.
+								const auto oldActiveMaskObject = VTObject::get_object_by_id(oldActiveMaskObjectId, *objectTree);
+
+								if ((nullptr != oldActiveMaskObject) &&
+								    ((VirtualTerminalObjectType::DataMask == oldActiveMaskObject->get_object_type()) ||
+								     (VirtualTerminalObjectType::AlarmMask == oldActiveMaskObject->get_object_type())))
+								{
+									enqueue_macros(oldActiveMaskObject, EventID::OnHide, oldActiveMaskObject->get_object_type(), managedWorkingSet);
+								}
+							}
+
+							// Read after the arbitration above, which is what settles B.3's "and its Working
+							// Set becoming active" half. newActiveMaskObject was validated above as a Data Mask
+							// or an Alarm Mask, so it needs no further type check.
+							if (activeWorkingSet == managedWorkingSet)
+							{
+								enqueue_macros(newActiveMaskObject, EventID::OnShow, newActiveMaskObject->get_object_type(), managedWorkingSet);
+							}
+						}
+						drain_macro_execution_queue();
 						LOG_DEBUG("[VT Server]: Client %u changed active mask to object %u for working set object %u", managedWorkingSet->get_control_function()->get_address(), newActiveMaskObjectId, workingSetObjectId);
 					}
 					else
@@ -1595,9 +1661,15 @@ namespace isobus
 					const std::uint16_t oldActiveMaskObjectId = retargetsWorkingSetActiveMask ?
 					  std::static_pointer_cast<WorkingSet>(targetObject)->get_active_mask() :
 					  NULL_OBJECT_ID;
+					// Table B.3's On Hide gate, captured before any side effect for the reason the Change
+					// Active Mask case gives at its own capture.
+					const bool workingSetWasDisplayed = (activeWorkingSet == managedWorkingSet);
 
 					if (targetObject->set_attribute(attributeID, attributeData, *objectTree, errorCode)) // 0 Is always the read-only "type" attribute
 					{
+						const std::uint16_t newActiveMaskObjectId = retargetsWorkingSetActiveMask ?
+						  std::static_pointer_cast<WorkingSet>(targetObject)->get_active_mask() :
+						  NULL_OBJECT_ID;
 						// A Change Attribute that retargets a Working Set's active mask makes the same mask change a
 						// Change Active Mask command does, so ISO 11783-6 Table 5's Data-input rows bind here too: an
 						// object open for operator input is forced closed, and the responses "shall be sent in the
@@ -1612,7 +1684,6 @@ namespace isobus
 						// carry 0058 uses is applied here too.
 						if (retargetsWorkingSetActiveMask)
 						{
-							const std::uint16_t newActiveMaskObjectId = std::static_pointer_cast<WorkingSet>(targetObject)->get_active_mask();
 							const std::uint16_t openForInputBeforeMaskChange = managedWorkingSet->get_object_open_for_input();
 							if (newActiveMaskObjectId != oldActiveMaskObjectId)
 							{
@@ -1643,7 +1714,47 @@ namespace isobus
 						// attribute changed nothing the screen depends on.
 						apply_active_working_set_arbitration();
 						dispatch_repaint(managedWorkingSet);
-						process_macro(targetObject, EventID::OnChangeAttribute, targetObject->get_object_type(), managedWorkingSet);
+
+						// Table A.3 event 9 for the command itself. The mask events follow it because a
+						// retarget of attribute 3 is the same change of visible state a Change Active Mask
+						// command makes, and Table B.3 phrases both mask events on that state rather than on
+						// a command: On Hide is caused by "the active mask changed for the Working Set", On
+						// Show by "both the Data Mask and its Working Set becoming active". Event 7 is NOT
+						// among them -- Table A.3 names the Change Active Mask COMMAND as its trigger, and
+						// this is not that command. Gates, ordering and the single drain are as the Change
+						// Active Mask case documents them.
+						enqueue_macros(targetObject, EventID::OnChangeAttribute, targetObject->get_object_type(), managedWorkingSet);
+
+						if (retargetsWorkingSetActiveMask && (newActiveMaskObjectId != oldActiveMaskObjectId))
+						{
+							if (workingSetWasDisplayed)
+							{
+								const auto oldActiveMaskObject = VTObject::get_object_by_id(oldActiveMaskObjectId, *objectTree);
+
+								if ((nullptr != oldActiveMaskObject) &&
+								    ((VirtualTerminalObjectType::DataMask == oldActiveMaskObject->get_object_type()) ||
+								     (VirtualTerminalObjectType::AlarmMask == oldActiveMaskObject->get_object_type())))
+								{
+									enqueue_macros(oldActiveMaskObject, EventID::OnHide, oldActiveMaskObject->get_object_type(), managedWorkingSet);
+								}
+							}
+
+							// Unlike the Change Active Mask command, this path validated no mask type: carry
+							// 0061 refuses a retarget whose target is not a mask before it is written, so a
+							// written value is a mask -- but it is resolved and type-tested here anyway,
+							// symmetric with the old mask, so this block does not depend on a guard that lives
+							// in another case.
+							const auto newActiveMaskObject = VTObject::get_object_by_id(newActiveMaskObjectId, *objectTree);
+
+							if ((activeWorkingSet == managedWorkingSet) &&
+							    (nullptr != newActiveMaskObject) &&
+							    ((VirtualTerminalObjectType::DataMask == newActiveMaskObject->get_object_type()) ||
+							     (VirtualTerminalObjectType::AlarmMask == newActiveMaskObject->get_object_type())))
+							{
+								enqueue_macros(newActiveMaskObject, EventID::OnShow, newActiveMaskObject->get_object_type(), managedWorkingSet);
+							}
+						}
+						drain_macro_execution_queue();
 					}
 					else
 					{
@@ -2940,23 +3051,14 @@ namespace isobus
 
 	void VirtualTerminalServer::process_macro(std::shared_ptr<isobus::VTObject> object, isobus::EventID macroEvent, isobus::VirtualTerminalObjectType targetObjectType, std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingset)
 	{
-		if (nullptr != object && targetObjectType == object->get_object_type())
-		{
-			// Enqueue every macro on this object that matches the event, in the object's macro-list
-			// order, then drain. Enqueue-all-then-drain is what makes triggered macros run in trigger
-			// order and each complete before the next starts (ISO 11783-6 4.6.11.4 b/c). If a drain is
-			// already active (this object's event was itself raised by a macro-replayed command), the
-			// drain call is a no-op and the active drain runs these in turn.
-			for (std::uint8_t i = 0; i < object->get_number_macros(); i++)
-			{
-				auto macroMetadata = object->get_macro(i);
-				if (macroMetadata.event == macroEvent)
-				{
-					macroExecutionQueue.push_back({ macroMetadata.macroID, workingset });
-				}
-			}
-			drain_macro_execution_queue();
-		}
+		// Enqueue every macro on this object that matches the event, in the object's macro-list order,
+		// then drain. Enqueue-all-then-drain is what makes triggered macros run in trigger order and
+		// each complete before the next starts (ISO 11783-6 4.6.11.4 b/c). If a drain is already active
+		// (this object's event was itself raised by a macro-replayed command), the drain call is a no-op
+		// and the active drain runs these in turn. A caller raising several events from one command
+		// calls enqueue_macros for each and drains once, for the reason given at that declaration.
+		enqueue_macros(object, macroEvent, targetObjectType, workingset);
+		drain_macro_execution_queue();
 	}
 
 	bool VirtualTerminalServer::send_change_numeric_value_response(std::uint16_t objectID, std::uint8_t errorBitfield, std::uint32_t value, std::shared_ptr<ControlFunction> destination) const

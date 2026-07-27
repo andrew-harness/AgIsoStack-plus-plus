@@ -119,6 +119,26 @@ namespace isobus
 		return retVal;
 	}
 
+	void VirtualTerminalServer::enqueue_macros(std::shared_ptr<isobus::VTObject> object, isobus::EventID macroEvent, isobus::VirtualTerminalObjectType targetObjectType, std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingset)
+	{
+		// The type test is the object-applicability guard: Table A.3's events are allocated to object
+		// types by each object's own event table (B.1 for a Working Set, B.3 for a Data Mask, ...), so a
+		// caller names the type the event belongs to and an object of any other type contributes nothing.
+		if ((nullptr != object) && (targetObjectType == object->get_object_type()))
+		{
+			// Macro-list order within one event, which is the only order the pool itself declares.
+			for (std::uint8_t i = 0; i < object->get_number_macros(); i++)
+			{
+				const auto macroMetadata = object->get_macro(i);
+
+				if (macroMetadata.event == macroEvent)
+				{
+					macroExecutionQueue.push_back({ macroMetadata.macroID, workingset });
+				}
+			}
+		}
+	}
+
 	void VirtualTerminalServer::drain_macro_execution_queue()
 	{
 		// Re-entrancy guard: a macro command that triggers another macro enqueues it and calls this

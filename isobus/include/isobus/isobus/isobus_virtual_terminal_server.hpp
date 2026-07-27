@@ -202,6 +202,20 @@ namespace isobus
 		/// @param[in] workingset The working set to execute the macro on
 		void process_macro(std::shared_ptr<isobus::VTObject> object, isobus::EventID macroEvent, isobus::VirtualTerminalObjectType targetObjectType, std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingset);
 
+		/// @brief Appends an object's macro references matching an event to the execution queue without
+		/// draining it. This is process_macro's enqueue half, separated for the caller that raises
+		/// SEVERAL events from one bus command: ISO 11783-6 4.6.11.4 c) runs macros in the order they
+		/// were TRIGGERED, and events raised together by one command are triggered together, so they
+		/// must all be queued before any of them runs. Calling process_macro once per event instead
+		/// would drain the first event's macros -- and everything they trigger in turn -- before the
+		/// second event was ever queued, which inverts c) whenever a macro triggers another.
+		/// Every caller of this must end with drain_macro_execution_queue().
+		/// @param[in] object The object to check for a macro (or macros) to enqueue
+		/// @param[in] macroEvent The event ID of the macro(s) to enqueue
+		/// @param[in] targetObjectType The type of object that the macro is defined for. Used to validate the object
+		/// @param[in] workingset The working set to execute the macro on
+		void enqueue_macros(std::shared_ptr<isobus::VTObject> object, isobus::EventID macroEvent, isobus::VirtualTerminalObjectType targetObjectType, std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingset);
+
 		/// @brief Fires the macros an operator event triggers on a Key or Button object (ISO 11783-6
 		/// 4.6.11; Table A.3 events OnKeyPress = 24 "A Soft Key or Button is pressed" and
 		/// OnKeyRelease = 25 "A Soft Key or Button is released"). The VT owns this trigger: the client
