@@ -133,7 +133,7 @@ namespace isobus
 			// The response answers a frame a newer activation already superseded (H.1: the TAN aligns
 			// potentially overlapping message-response pairs). The current entry keeps waiting for its
 			// own response.
-			LOG_DEBUG("[VT Server]: Activation response for function 0x%02X from client %u carried TAN %u, but the outstanding activation has TAN %u; ignoring the superseded response.",
+			LOG_DEBUG("[VT Server]: Activation response for function 0x%02X from client 0x%02X carried TAN %u, but the outstanding activation has TAN %u; ignoring the superseded response.",
 			          functionCode,
 			          (nullptr != workingSet->get_control_function()) ? workingSet->get_control_function()->get_address() : NULL_CAN_ADDRESS,
 			          responseTan,

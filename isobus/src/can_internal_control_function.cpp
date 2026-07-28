@@ -188,7 +188,7 @@ namespace isobus
 					{
 						// Can't claim because we cannot tolerate an arbitrary address, and the CF at that spot wins contention
 						set_current_state(State::UnableToClaim);
-						LOG_ERROR("[AC]: Internal control function %016llx failed to claim its preferred address %u on channel %u, as it cannot tolerate for an arbitrary address and there is already a CF at the preferred address that wins contention.",
+						LOG_ERROR("[AC]: Internal control function %016llx failed to claim its preferred address 0x%02X on channel %u, as it cannot tolerate for an arbitrary address and there is already a CF at the preferred address that wins contention.",
 						          get_NAME().get_full_name(),
 						          preferredAddress,
 						          get_can_port());
@@ -202,7 +202,7 @@ namespace isobus
 			{
 				if (send_address_claim(preferredAddress))
 				{
-					LOG_DEBUG("[AC]: Internal control function %016llx has claimed address %u on channel %u",
+					LOG_DEBUG("[AC]: Internal control function %016llx has claimed address 0x%02X on channel %u",
 					          get_NAME().get_full_name(),
 					          get_preferred_address(),
 					          get_can_port());
@@ -229,14 +229,14 @@ namespace isobus
 						if (NULL_CAN_ADDRESS == get_preferred_address())
 						{
 							preferredAddress = i;
-							LOG_DEBUG("[AC]: Internal control function %016llx has arbitrarily claimed address %u on channel %u",
+							LOG_DEBUG("[AC]: Internal control function %016llx has arbitrarily claimed address 0x%02X on channel %u",
 							          get_NAME().get_full_name(),
 							          i,
 							          get_can_port());
 						}
 						else
 						{
-							LOG_DEBUG("[AC]: Internal control function %016llx could not use the preferred address, but has arbitrarily claimed address %u on channel %u",
+							LOG_DEBUG("[AC]: Internal control function %016llx could not use the preferred address, but has arbitrarily claimed address 0x%02X on channel %u",
 							          get_NAME().get_full_name(),
 							          i,
 							          get_can_port());
@@ -272,7 +272,7 @@ namespace isobus
 			{
 				if (send_address_claim(preferredAddress))
 				{
-					LOG_DEBUG("[AC]: Internal control function %016llx has won address contention and claimed address %u on channel %u",
+					LOG_DEBUG("[AC]: Internal control function %016llx has won address contention and claimed address 0x%02X on channel %u",
 					          get_NAME().get_full_name(),
 					          get_preferred_address(),
 					          get_can_port());
@@ -378,19 +378,19 @@ namespace isobus
 				{
 					// Commanded address is free. We'll claim it.
 					set_current_state(State::SendPreferredAddressClaim);
-					LOG_INFO("[AC]: Our address was commanded to a new value of %u", commandedAddress);
+					LOG_INFO("[AC]: Our address was commanded to a new value of 0x%02X", commandedAddress);
 				}
 				else if (deviceAtOurPreferredAddress->get_NAME().get_full_name() < controlFunctionNAME.get_full_name())
 				{
 					// We can steal the address of the device at our commanded address and force it to move
 					set_current_state(State::SendArbitraryAddressClaim);
-					LOG_INFO("[AC]: Our address was commanded to a new value of %u, and an ECU at the target address is being evicted.", commandedAddress);
+					LOG_INFO("[AC]: Our address was commanded to a new value of 0x%02X, and an ECU at the target address is being evicted.", commandedAddress);
 				}
 				else
 				{
 					// We can't steal the address of the device at our commanded address, so we'll just ignore the command
 					// and log an error.
-					LOG_ERROR("[AC]: Our address was commanded to a new value of %u, but we cannot move to the target address.", commandedAddress);
+					LOG_ERROR("[AC]: Our address was commanded to a new value of 0x%02X, but we cannot move to the target address.", commandedAddress);
 				}
 			}
 		}
@@ -410,7 +410,7 @@ namespace isobus
 		    (message.get_can_port_index() == get_can_port()) &&
 		    (State::AddressClaimingComplete == get_current_state()))
 		{
-			LOG_WARNING("[AC]: Address violation for address %u", get_address());
+			LOG_WARNING("[AC]: Address violation for address 0x%02X", get_address());
 
 			set_current_state(State::SendReclaimAddressOnRequest);
 			return true;

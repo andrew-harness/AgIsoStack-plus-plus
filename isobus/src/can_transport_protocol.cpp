@@ -154,7 +154,7 @@ namespace isobus
 			auto oldSession = get_session(source, nullptr);
 			if (nullptr != oldSession)
 			{
-				LOG_WARNING("[TP]: Received Broadcast Announcement Message (BAM) while a session already existed for this source (%hu), overwriting for 0x%05X...",
+				LOG_WARNING("[TP]: Received Broadcast Announcement Message (BAM) while a session already existed for this source (0x%02X), overwriting for 0x%05X...",
 				            source->get_address(),
 				            parameterGroupNumber);
 				close_session(oldSession, false);
@@ -184,7 +184,7 @@ namespace isobus
 				}
 
 				update_state_machine(newSession);
-				LOG_DEBUG("[TP]: New rx broadcast message session for 0x%05X. Source: %hu", parameterGroupNumber, source->get_address());
+				LOG_DEBUG("[TP]: New rx broadcast message session for 0x%05X. Source: 0x%02X", parameterGroupNumber, source->get_address());
 			}
 		}
 	}
@@ -255,7 +255,7 @@ namespace isobus
 					activeSessions.push_back(newSession);
 				}
 
-				LOG_DEBUG("[TP]: New rx session for 0x%05X. Source: %hu, destination: %hu", parameterGroupNumber, source->get_address(), destination->get_address());
+				LOG_DEBUG("[TP]: New rx session for 0x%05X. Source: 0x%02X, destination: 0x%02X", parameterGroupNumber, source->get_address(), destination->get_address());
 				update_state_machine(newSession);
 			}
 		}
@@ -318,7 +318,7 @@ namespace isobus
 			{
 				session->state = StateMachineState::None;
 				close_session(session, true);
-				LOG_DEBUG("[TP]: Completed tx session for 0x%05X from %hu", parameterGroupNumber, source->get_address());
+				LOG_DEBUG("[TP]: Completed tx session for 0x%05X from 0x%02X", parameterGroupNumber, source->get_address());
 			}
 			else
 			{
@@ -494,7 +494,7 @@ namespace isobus
 		{
 			if (StateMachineState::WaitForDataTransferPacket != session->state)
 			{
-				LOG_WARNING("[TP]: Received a Data Transfer message from %hu while not expecting one, sending abort", source->get_address());
+				LOG_WARNING("[TP]: Received a Data Transfer message from 0x%02X while not expecting one, sending abort", source->get_address());
 				abort_session(session, ConnectionAbortReason::UnexpectedDataTransferPacketReceived);
 			}
 			else if (sequenceNumber == session->get_last_sequence_number())
@@ -564,7 +564,7 @@ namespace isobus
 
 					canMessageReceivedCallback(completedMessage);
 					close_session(session, true);
-					LOG_DEBUG("[TP]: Completed rx session for 0x%05X from %hu", session->get_parameter_group_number(), source->get_address());
+					LOG_DEBUG("[TP]: Completed rx session for 0x%05X from 0x%02X", session->get_parameter_group_number(), source->get_address());
 				}
 				else if (session->get_cts_number_of_packets_remaining() == 0)
 				{
@@ -579,7 +579,7 @@ namespace isobus
 		}
 		else if (!message.is_broadcast())
 		{
-			LOG_WARNING("[TP]: Received a Data Transfer message from %hu with no matching session, ignoring...", source->get_address());
+			LOG_WARNING("[TP]: Received a Data Transfer message from 0x%02X with no matching session, ignoring...", source->get_address());
 		}
 	}
 
@@ -645,7 +645,7 @@ namespace isobus
 		{
 			// Broadcast message
 			session->set_state(StateMachineState::SendBroadcastAnnounce);
-			LOG_DEBUG("[TP]: New broadcast tx session for 0x%05X. Source: %hu",
+			LOG_DEBUG("[TP]: New broadcast tx session for 0x%05X. Source: 0x%02X",
 			          parameterGroupNumber,
 			          source->get_address());
 		}
@@ -653,7 +653,7 @@ namespace isobus
 		{
 			// Destination specific message
 			session->set_state(StateMachineState::SendRequestToSend);
-			LOG_DEBUG("[TP]: New tx session for 0x%05X. Source: %hu, destination: %hu",
+			LOG_DEBUG("[TP]: New tx session for 0x%05X. Source: 0x%02X, destination: 0x%02X",
 			          parameterGroupNumber,
 			          source->get_address(),
 			          destination->get_address());

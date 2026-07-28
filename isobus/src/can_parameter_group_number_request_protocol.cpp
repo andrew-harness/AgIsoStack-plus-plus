@@ -240,9 +240,8 @@ namespace isobus
 							send_acknowledgement(AcknowledgementType::Negative,
 							                     requestedPGN,
 							                     message.get_source_control_function());
-							LOG_WARNING("[PR]: NACK-ing PGN request for PGN " +
-							            isobus::to_string(requestedPGN) +
-							            " because no callback could handle it.");
+							LOG_WARNING("[PR]: NACK-ing PGN request for PGN 0x%05X because no callback could handle it.",
+							            requestedPGN);
 						}
 					}
 					else

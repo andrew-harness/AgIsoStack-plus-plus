@@ -358,11 +358,9 @@ namespace isobus
 				parentInterface->countryCode.push_back(static_cast<char>(data.at(7)));
 			}
 
-			LOG_DEBUG("[VT/TC]: Language and unit data received from control function " +
-			            isobus::to_string(static_cast<int>(message.get_identifier().get_source_address())) +
-			            " language is: " +
-			            parentInterface->languageCode.c_str(),
-			          " and country code is ",
+			LOG_DEBUG("[VT/TC]: Language and unit data received from control function 0x%02X language is: %s and country code is %s",
+			          message.get_identifier().get_source_address(),
+			          parentInterface->languageCode.c_str(),
 			          parentInterface->countryCode.empty() ? "unknown." : parentInterface->countryCode.c_str());
 		}
 	}

@@ -349,7 +349,7 @@ namespace isobus
 			{
 				if (address != controlFunction->get_address())
 				{
-					LOG_WARNING("[NM]: %s control function with address '%d' was at incorrect address '%d' in the lookup table prior to deactivation.",
+					LOG_WARNING("[NM]: %s control function with address '0x%02X' was at incorrect address '0x%02X' in the lookup table prior to deactivation.",
 					            controlFunction->get_type_string().c_str(),
 					            controlFunction->get_address(),
 					            address);
@@ -364,7 +364,7 @@ namespace isobus
 				}
 			}
 		}
-		LOG_DEBUG("[NM]: %s control function at address '%d' is deactivated.",
+		LOG_DEBUG("[NM]: %s control function at address '0x%02X' is deactivated.",
 		          controlFunction->get_type_string().c_str(),
 		          controlFunction->get_address());
 	}
@@ -579,7 +579,7 @@ namespace isobus
 				// Need to evict them from the table and move them to the inactive list
 				targetControlFunction->address = NULL_CAN_ADDRESS;
 				inactiveControlFunctions.push_back(targetControlFunction);
-				LOG_INFO("[NM]: %s CF '%016llx' is evicted from address '%d' on channel '%d', as their address is probably stolen.",
+				LOG_INFO("[NM]: %s CF '%016llx' is evicted from address '0x%02X' on channel '%d', as their address is probably stolen.",
 				         targetControlFunction->get_type_string().c_str(),
 				         targetControlFunction->get_NAME().get_full_name(),
 				         claimedAddress,
@@ -604,7 +604,7 @@ namespace isobus
 				{
 					targetControlFunction = *result;
 
-					LOG_DEBUG("[NM]: %s CF '%016llx' is now active at address '%d' on channel '%d'.",
+					LOG_DEBUG("[NM]: %s CF '%016llx' is now active at address '0x%02X' on channel '%d'.",
 					          targetControlFunction->get_type_string().c_str(),
 					          targetControlFunction->get_NAME().get_full_name(),
 					          claimedAddress,
@@ -845,7 +845,7 @@ namespace isobus
 			{
 				// New device, need to start keeping track of it
 				foundControlFunction = create_external_control_function(NAME(claimedNAME), claimedAddress, rxFrame.channel);
-				LOG_DEBUG("[NM]: A control function claimed address %u on channel %u", foundControlFunction->get_address(), foundControlFunction->get_can_port());
+				LOG_DEBUG("[NM]: A control function claimed address 0x%02X on channel %u", foundControlFunction->get_address(), foundControlFunction->get_can_port());
 				process_control_function_state_change_callback(foundControlFunction, ControlFunctionState::Online);
 			}
 			else if ((foundControlFunction->get_address() != claimedAddress) && (claimedAddress < NULL_CAN_ADDRESS))
@@ -854,7 +854,7 @@ namespace isobus
 				{
 					controlFunctionTable[rxFrame.channel][claimedAddress] = foundControlFunction;
 					controlFunctionTable[rxFrame.channel][foundControlFunction->get_address()] = nullptr;
-					LOG_INFO("[NM]: The %s control function at address %d changed it's address to %d on channel %u.",
+					LOG_INFO("[NM]: The %s control function at address 0x%02X changed it's address to 0x%02X on channel %u.",
 					         foundControlFunction->get_type_string().c_str(),
 					         foundControlFunction->get_address(),
 					         claimedAddress,
@@ -864,7 +864,7 @@ namespace isobus
 				}
 				else
 				{
-					LOG_INFO("[NM]: %s control function with name %016llx has claimed address %u on channel %u.",
+					LOG_INFO("[NM]: %s control function with name %016llx has claimed address 0x%02X on channel %u.",
 					         foundControlFunction->get_type_string().c_str(),
 					         foundControlFunction->get_NAME().get_full_name(),
 					         claimedAddress,
@@ -909,7 +909,7 @@ namespace isobus
 						controlFunctionTable[partner->get_can_port()][partner->address] = std::shared_ptr<ControlFunction>(partner);
 						process_control_function_state_change_callback(partner, ControlFunctionState::Online);
 
-						LOG_INFO("[NM]: A partner with name %016llx has claimed address %u on channel %u.",
+						LOG_INFO("[NM]: A partner with name %016llx has claimed address 0x%02X on channel %u.",
 						         partner->get_NAME().get_full_name(),
 						         partner->get_address(),
 						         partner->get_can_port());
@@ -961,10 +961,9 @@ namespace isobus
 				}
 				else
 				{
-					LOG_WARNING("[NM]: Cannot send a message with PGN " +
-					            isobus::to_string(static_cast<int>(parameterGroupNumber)) +
-					            " as a destination specific message. " +
-					            "Try resending it using nullptr as your destination control function.");
+					LOG_WARNING("[NM]: Cannot send a message with PGN 0x%05X as a destination specific message. "
+					            "Try resending it using nullptr as your destination control function.",
+					            parameterGroupNumber);
 					identifier = DEFAULT_IDENTIFIER;
 				}
 			}
@@ -1143,7 +1142,7 @@ namespace isobus
 					if (ControlFunction::Type::Internal != controlFunction->get_type())
 					{
 						inactiveControlFunctions.push_back(controlFunction);
-						LOG_INFO("[NM]: Control function with address %u and NAME %016llx is now offline on channel %u.", controlFunction->get_address(), controlFunction->get_NAME(), channelIndex);
+						LOG_INFO("[NM]: Control function with address 0x%02X and NAME %016llx is now offline on channel %u.", controlFunction->get_address(), controlFunction->get_NAME().get_full_name(), channelIndex);
 						tableEntry = nullptr;
 						controlFunction->address = NULL_CAN_ADDRESS;
 					}

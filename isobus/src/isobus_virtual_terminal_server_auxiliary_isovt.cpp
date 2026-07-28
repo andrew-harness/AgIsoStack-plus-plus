@@ -42,7 +42,7 @@ namespace isobus
 		if (data.size() >= 2)
 		{
 			const std::uint8_t requestType = data.at(1);
-			LOG_DEBUG("[VT Server]: Client at address %u requested Auxiliary Capabilities (request type %u).", message.get_identifier().get_source_address(), requestType);
+			LOG_DEBUG("[VT Server]: Client at address 0x%02X requested Auxiliary Capabilities (request type %u).", message.get_identifier().get_source_address(), requestType);
 			send_auxiliary_capabilities_response(requestType, message.get_source_control_function());
 			retVal = true;
 		}
@@ -99,7 +99,7 @@ namespace isobus
 		if (malformed)
 		{
 			entries.clear();
-			LOG_DEBUG("[VT Server]: Client %u sent a malformed Preferred Assignment command; routing an empty assignment list.", managedWorkingSet->get_control_function()->get_address());
+			LOG_DEBUG("[VT Server]: Client 0x%02X sent a malformed Preferred Assignment command; routing an empty assignment list.", managedWorkingSet->get_control_function()->get_address());
 		}
 		on_auxiliary_preferred_assignment_received(managedWorkingSet, entries);
 	}

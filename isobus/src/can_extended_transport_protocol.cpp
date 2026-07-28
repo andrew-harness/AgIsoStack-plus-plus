@@ -182,7 +182,7 @@ namespace isobus
 				LOCK_GUARD(Mutex, activeSessionsMutex);
 				activeSessions.push_back(newSession);
 			}
-			LOG_DEBUG("[ETP]: New rx session for 0x%05X. Source: %hu, destination: %hu", parameterGroupNumber, source->get_address(), destination->get_address());
+			LOG_DEBUG("[ETP]: New rx session for 0x%05X. Source: 0x%02X, destination: 0x%02X", parameterGroupNumber, source->get_address(), destination->get_address());
 			update_state_machine(newSession);
 		}
 	}
@@ -298,7 +298,7 @@ namespace isobus
 				session->state = StateMachineState::None;
 				bool successful = (numberOfBytesTransferred == session->get_message_length());
 				close_session(session, successful);
-				LOG_DEBUG("[ETP]: Completed tx session for 0x%05X from %hu (successful=%s)", parameterGroupNumber, source->get_address(), successful ? "true" : "false");
+				LOG_DEBUG("[ETP]: Completed tx session for 0x%05X from 0x%02X (successful=%s)", parameterGroupNumber, source->get_address(), successful ? "true" : "false");
 			}
 			else
 			{
@@ -432,7 +432,7 @@ namespace isobus
 		{
 			if (StateMachineState::WaitForDataTransferPacket != session->state)
 			{
-				LOG_WARNING("[ETP]: Received a Data Transfer message from %hu while not expecting one, sending abort", source->get_address());
+				LOG_WARNING("[ETP]: Received a Data Transfer message from 0x%02X while not expecting one, sending abort", source->get_address());
 				abort_session(session, ConnectionAbortReason::UnexpectedDataTransferPacketReceived);
 			}
 			else if (sequenceNumber == session->get_last_sequence_number())
@@ -499,7 +499,7 @@ namespace isobus
 
 					canMessageReceivedCallback(completedMessage);
 					close_session(session, true);
-					LOG_DEBUG("[ETP]: Completed rx session for 0x%05X from %hu", session->get_parameter_group_number(), source->get_address());
+					LOG_DEBUG("[ETP]: Completed rx session for 0x%05X from 0x%02X", session->get_parameter_group_number(), source->get_address());
 				}
 				else if (session->get_dpo_number_of_packets_remaining() == 0)
 				{
@@ -575,7 +575,7 @@ namespace isobus
 		                                                                  sessionCompleteCallback,
 		                                                                  parentPointer);
 		session->set_state(StateMachineState::SendRequestToSend);
-		LOG_DEBUG("[ETP]: New tx session for 0x%05X. Source: %hu, destination: %hu",
+		LOG_DEBUG("[ETP]: New tx session for 0x%05X. Source: 0x%02X, destination: 0x%02X",
 		          parameterGroupNumber,
 		          source->get_address(),
 		          destination->get_address());

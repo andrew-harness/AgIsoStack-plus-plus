@@ -857,7 +857,7 @@ namespace isobus
 				ws->set_mask_lock(NULL_OBJECT_ID, 0, 0, {});
 				dispatch_repaint(ws);
 				send_lock_unlock_mask_response(0, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::UnsolicitedUnlockTimeoutOccurred)), true, ws->get_control_function());
-				LOG_WARNING("[VT Server]: Mask lock held by the working set at address %u timed out and was released.", (nullptr != ws->get_control_function()) ? ws->get_control_function()->get_address() : isobus::NULL_CAN_ADDRESS);
+				LOG_WARNING("[VT Server]: Mask lock held by the working set at address 0x%02X timed out and was released.", (nullptr != ws->get_control_function()) ? ws->get_control_function()->get_address() : isobus::NULL_CAN_ADDRESS);
 			}
 		}
 	}
@@ -950,15 +950,15 @@ namespace isobus
 				// (which is itself a 4.6.9 unexpected shutdown, so it maps to the same loss reason below).
 				if (poolInvalidated)
 				{
-					LOG_ERROR("[VT Server]: Working set at address %u had an invalid object pool update - deleting the entire pool from volatile memory and suspending the working set per ISO 11783-6 C.2.6.", lostAddress);
+					LOG_ERROR("[VT Server]: Working set at address 0x%02X had an invalid object pool update - deleting the entire pool from volatile memory and suspending the working set per ISO 11783-6 C.2.6.", lostAddress);
 				}
 				else if (maintenanceTimedOut)
 				{
-					LOG_ERROR("[VT Server]: Working set at address %u lost - no Working Set Maintenance message for over 3 s. Deleting its object pool per ISO 11783-6 4.6.9.", lostAddress);
+					LOG_ERROR("[VT Server]: Working set at address 0x%02X lost - no Working Set Maintenance message for over 3 s. Deleting its object pool per ISO 11783-6 4.6.9.", lostAddress);
 				}
 				else
 				{
-					LOG_ERROR("[VT Server]: Working set at address %u lost - a required activation response was not received after three retries. Treating it as an unexpected shutdown per ISO 11783-6 H.1 / 4.6.9 and deleting its object pool.", lostAddress);
+					LOG_ERROR("[VT Server]: Working set at address 0x%02X lost - a required activation response was not received after three retries. Treating it as an unexpected shutdown per ISO 11783-6 H.1 / 4.6.9 and deleting its object pool.", lostAddress);
 				}
 
 				// Clause 4.6.9 requires the VT to alert the operator on an unexpected working-set shutdown,
@@ -984,7 +984,7 @@ namespace isobus
 				if ((workingSetHasControlFunction) &&
 				    (!delete_object_pool(ws->get_control_function()->get_NAME())))
 				{
-					LOG_WARNING("[VT Server]: Failed to delete the object pool for the lost working set at address %u.", lostAddress);
+					LOG_WARNING("[VT Server]: Failed to delete the object pool for the lost working set at address 0x%02X.", lostAddress);
 				}
 
 				// Drop any Annex H activation-tracker state before the working set is erased, so a later

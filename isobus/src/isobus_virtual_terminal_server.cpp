@@ -238,10 +238,10 @@ namespace isobus
 				// This CF is probably trying to initiate communication with us.
 				managedWorkingSetList.emplace_back(std::make_shared<VirtualTerminalServerManagedWorkingSet>(message.get_source_control_function()));
 
-				LOG_INFO("[VT Server]: Client %u initiated working set maintenance messages with version %u", managedWorkingSetList.back()->get_control_function()->get_address(), data[2]);
+				LOG_INFO("[VT Server]: Client 0x%02X initiated working set maintenance messages with version %u", managedWorkingSetList.back()->get_control_function()->get_address(), data[2]);
 				if (data[2] > get_vt_version_byte(get_version()))
 				{
-					LOG_WARNING("[VT Server]: Client %u version %u is higher than our reported version, which is %u", managedWorkingSetList.back()->get_control_function()->get_address(), data[2], get_vt_version_byte(get_version()));
+					LOG_WARNING("[VT Server]: Client 0x%02X version %u is higher than our reported version, which is %u", managedWorkingSetList.back()->get_control_function()->get_address(), data[2], get_vt_version_byte(get_version()));
 				}
 				managedWorkingSetList.back()->set_working_set_maintenance_message_timestamp_ms(SystemTiming::get_timestamp_ms());
 				managedWorkingSetList.back()->set_working_set_maintenance_version(data[2], {});
@@ -562,13 +562,13 @@ namespace isobus
 					// absent from the pool the client is then told is loaded. Recording the drop is what
 					// turns that silent success into the error response End of Object Pool sends below.
 					managedWorkingSet->set_object_pool_transfer_data_dropped();
-					LOG_WARNING("[VT Server]: Client at address %u transferred object pool data while its previous pool is still being parsed. Dropping the data; this client should be waiting on the VT Status busy-parsing bit. Its End of Object Pool will now be refused.", message.get_identifier().get_source_address());
+					LOG_WARNING("[VT Server]: Client at address 0x%02X transferred object pool data while its previous pool is still being parsed. Dropping the data; this client should be waiting on the VT Status busy-parsing bit. Its End of Object Pool will now be refused.", message.get_identifier().get_source_address());
 					break;
 				}
 
 				std::vector<std::uint8_t> tempPool = data; // Make a copy of the data (ouch)
 				tempPool.erase(tempPool.begin()); // Strip off the mux byte (double ouch, good thing this is rare)
-				LOG_INFO("[VT Server]: An ecu at address %u transferred %u bytes of object pool data to us.", message.get_identifier().get_source_address(), static_cast<std::uint32_t>(tempPool.size()));
+				LOG_INFO("[VT Server]: An ecu at address 0x%02X transferred %u bytes of object pool data to us.", message.get_identifier().get_source_address(), static_cast<std::uint32_t>(tempPool.size()));
 				managedWorkingSet->add_iop_raw_data(tempPool);
 			}
 			break;
@@ -580,7 +580,7 @@ namespace isobus
 				std::vector<std::uint8_t> buffer;
 				buffer.push_back(static_cast<std::uint8_t>(Function::GetVersionsResponse));
 
-				LOG_DEBUG("[VT Server]: Client %u requests stored versions", message.get_source_control_function()->get_address());
+				LOG_DEBUG("[VT Server]: Client 0x%02X requests stored versions", message.get_source_control_function()->get_address());
 
 				if (versions.size() > 255)
 				{
@@ -634,7 +634,7 @@ namespace isobus
 					// the raw chunk buffer belongs to the parse worker while it runs, and a second parse
 					// cannot be started while one is outstanding. E.7 byte 6 bit 3 is "Any other error".
 					send_load_version_response(get_bit(static_cast<std::uint8_t>(LoadVersionErrorBit::AnyOtherError)), managedWorkingSet->get_control_function());
-					LOG_WARNING("[VT Server]: Client at address %u sent a Load Version command while its object pool is still being parsed. Refusing it.", message.get_identifier().get_source_address());
+					LOG_WARNING("[VT Server]: Client at address 0x%02X sent a Load Version command while its object pool is still being parsed. Refusing it.", message.get_identifier().get_source_address());
 					break;
 				}
 
@@ -840,7 +840,7 @@ namespace isobus
 					// failure and is left in place for the client to retry, again as there.
 					const bool poolWasActive = (managedWorkingSet == activeWorkingSet);
 
-					LOG_ERROR("[VT Server]: Refusing the object pool of the working set at address %u: transfer data for it was dropped while an earlier parse was outstanding, so the pool is incomplete.", message.get_identifier().get_source_address());
+					LOG_ERROR("[VT Server]: Refusing the object pool of the working set at address 0x%02X: transfer data for it was dropped while an earlier parse was outstanding, so the pool is incomplete.", message.get_identifier().get_source_address());
 					send_end_of_object_pool_response(false, NULL_OBJECT_ID, NULL_OBJECT_ID, static_cast<std::uint8_t>(get_bit(2) | (poolWasActive ? get_bit(3) : 0)), managedWorkingSet->get_control_function());
 
 					if (poolWasActive)
@@ -881,7 +881,7 @@ namespace isobus
 				if (is_object_open_for_input(managedWorkingSet, objectId) && !is_version6_pair(managedWorkingSet))
 				{
 					send_change_numeric_value_response(objectId, get_bit(static_cast<std::uint8_t>(ChangeNumericValueErrorBit::ValueInUse)), value, managedWorkingSet->get_control_function());
-					LOG_WARNING("[VT Server]: Client %u change numeric value on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), objectId);
+					LOG_WARNING("[VT Server]: Client 0x%02X change numeric value on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), objectId);
 					break;
 				}
 
@@ -988,7 +988,7 @@ namespace isobus
 							// Todo std::static_pointer_cast<Animation>(lTargetObject)->set_value(value);
 							// onChangeNumericValueEventDispatcher.call(objectId, value);
 							send_change_numeric_value_response(objectId, get_bit(static_cast<std::uint8_t>(ChangeNumericValueErrorBit::AnyOtherError)), value, managedWorkingSet->get_control_function());
-							LOG_WARNING("[VT Server]: Client %u change numeric value for animation not implemented yet", managedWorkingSet->get_control_function()->get_address());
+							LOG_WARNING("[VT Server]: Client 0x%02X change numeric value for animation not implemented yet", managedWorkingSet->get_control_function()->get_address());
 							logSuccess = false;
 						}
 						break;
@@ -1024,7 +1024,7 @@ namespace isobus
 							else
 							{
 								send_change_numeric_value_response(objectId, get_bit(static_cast<std::uint8_t>(ChangeNumericValueErrorBit::InvalidObjectID)), value, managedWorkingSet->get_control_function());
-								LOG_WARNING("[VT Server]: Client %u change numeric value on scaled graphic %u refused: target %u is not a graphic data, picture graphic, object pointer, or NULL", managedWorkingSet->get_control_function()->get_address(), objectId, newTarget);
+								LOG_WARNING("[VT Server]: Client 0x%02X change numeric value on scaled graphic %u refused: target %u is not a graphic data, picture graphic, object pointer, or NULL", managedWorkingSet->get_control_function()->get_address(), objectId, newTarget);
 								logSuccess = false;
 							}
 						}
@@ -1033,7 +1033,7 @@ namespace isobus
 						default:
 						{
 							send_change_numeric_value_response(objectId, get_bit(static_cast<std::uint8_t>(ChangeNumericValueErrorBit::InvalidObjectID)), value, managedWorkingSet->get_control_function());
-							LOG_WARNING("[VT Server]: Client %u change numeric value invalid object type. ID: %u", managedWorkingSet->get_control_function()->get_address(), objectId);
+							LOG_WARNING("[VT Server]: Client 0x%02X change numeric value invalid object type. ID: %u", managedWorkingSet->get_control_function()->get_address(), objectId);
 							logSuccess = false;
 						}
 						break;
@@ -1041,14 +1041,14 @@ namespace isobus
 
 					if (logSuccess)
 					{
-						LOG_DEBUG("[VT Server]: Client %u change numeric value command: change object ID %u to be %u", managedWorkingSet->get_control_function()->get_address(), objectId, value);
+						LOG_DEBUG("[VT Server]: Client 0x%02X change numeric value command: change object ID %u to be %u", managedWorkingSet->get_control_function()->get_address(), objectId, value);
 						process_macro(lTargetObject, isobus::EventID::OnChangeValue, lTargetObject->get_object_type(), managedWorkingSet);
 					}
 				}
 				else
 				{
 					send_change_numeric_value_response(objectId, get_bit(static_cast<std::uint8_t>(ChangeNumericValueErrorBit::InvalidObjectID)), value, managedWorkingSet->get_control_function());
-					LOG_WARNING("[VT Server]: Client %u change numeric value invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectId);
+					LOG_WARNING("[VT Server]: Client 0x%02X change numeric value invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectId);
 				}
 			}
 			break;
@@ -1066,19 +1066,19 @@ namespace isobus
 
 					if (0 == data[3])
 					{
-						LOG_DEBUG("[VT Server]: Client %u hide object command %u", managedWorkingSet->get_control_function()->get_address(), objectId);
+						LOG_DEBUG("[VT Server]: Client 0x%02X hide object command %u", managedWorkingSet->get_control_function()->get_address(), objectId);
 						process_macro(targetObject, EventID::OnHide, targetObject->get_object_type(), managedWorkingSet);
 					}
 					else
 					{
-						LOG_DEBUG("[VT Server]: Client %u show object command %u", managedWorkingSet->get_control_function()->get_address(), objectId);
+						LOG_DEBUG("[VT Server]: Client 0x%02X show object command %u", managedWorkingSet->get_control_function()->get_address(), objectId);
 						process_macro(targetObject, EventID::OnShow, targetObject->get_object_type(), managedWorkingSet);
 					}
 				}
 				else
 				{
 					send_hide_show_object_response(objectId, get_bit(static_cast<std::uint8_t>(HideShowObjectErrorBit::InvalidObjectID)), (0 != data[3]), managedWorkingSet->get_control_function());
-					LOG_WARNING("[VT Server]: Client %u hide/show object command failed. It can only affect containers! ID: %u", managedWorkingSet->get_control_function()->get_address(), objectId);
+					LOG_WARNING("[VT Server]: Client 0x%02X hide/show object command failed. It can only affect containers! ID: %u", managedWorkingSet->get_control_function()->get_address(), objectId);
 				}
 			}
 			break;
@@ -1097,7 +1097,7 @@ namespace isobus
 				if ((0 == data[3]) && is_object_open_for_input(managedWorkingSet, objectId))
 				{
 					send_enable_disable_object_response(objectId, get_bit(static_cast<std::uint8_t>(EnableDisableObjectErrorBit::CouldNotCompleteTheInputObjectIsCurrentlyBeingModified)), (0 != data[3]), managedWorkingSet->get_control_function());
-					LOG_WARNING("[VT Server]: Client %u disable object %u refused: operator input is active on it", managedWorkingSet->get_control_function()->get_address(), objectId);
+					LOG_WARNING("[VT Server]: Client 0x%02X disable object %u refused: operator input is active on it", managedWorkingSet->get_control_function()->get_address(), objectId);
 					break;
 				}
 
@@ -1189,25 +1189,25 @@ namespace isobus
 						if (anyObjectMatched)
 						{
 							send_change_child_location_response(parentObjectId, objectID, 0, managedWorkingSet->get_control_function());
-							LOG_DEBUG("[VT Server]: Client %u change child location command. Parent: %u, Target: %u, X-Offset: %d, Y-Offset: %d", managedWorkingSet->get_control_function()->get_address(), parentObjectId, objectID, xRelativeChange, yRelativeChange);
+							LOG_DEBUG("[VT Server]: Client 0x%02X change child location command. Parent: %u, Target: %u, X-Offset: %d, Y-Offset: %d", managedWorkingSet->get_control_function()->get_address(), parentObjectId, objectID, xRelativeChange, yRelativeChange);
 							process_macro(parentObject, EventID::ChangeChildLocation, parentObject->get_object_type(), managedWorkingSet);
 						}
 						else
 						{
 							send_change_child_location_response(parentObjectId, objectID, get_bit(static_cast<std::uint8_t>(ChangeChildLocationorPositionErrorBit::TargetObjectDoesNotExistOrIsNotApplicable)), managedWorkingSet->get_control_function());
-							LOG_WARNING("[VT Server]: Client %u change child location failed because the target object with ID %u isn't applicable", managedWorkingSet->get_control_function()->get_address(), objectID);
+							LOG_WARNING("[VT Server]: Client 0x%02X change child location failed because the target object with ID %u isn't applicable", managedWorkingSet->get_control_function()->get_address(), objectID);
 						}
 					}
 					else
 					{
 						send_change_child_location_response(parentObjectId, objectID, get_bit(static_cast<std::uint8_t>(ChangeChildLocationorPositionErrorBit::TargetObjectDoesNotExistOrIsNotApplicable)), managedWorkingSet->get_control_function());
-						LOG_WARNING("[VT Server]: Client %u change child location failed because the target object with ID %u doesn't exist", managedWorkingSet->get_control_function()->get_address(), objectID);
+						LOG_WARNING("[VT Server]: Client 0x%02X change child location failed because the target object with ID %u doesn't exist", managedWorkingSet->get_control_function()->get_address(), objectID);
 					}
 				}
 				else
 				{
 					send_change_child_location_response(parentObjectId, objectID, get_bit(static_cast<std::uint8_t>(ChangeChildLocationorPositionErrorBit::ParentObjectDoesntExistOrIsNotAParentOfSpecifiedObject)), managedWorkingSet->get_control_function());
-					LOG_WARNING("[VT Server]: Client %u change child location failed because the parent object with ID %u doesn't exist", managedWorkingSet->get_control_function()->get_address(), parentObjectId);
+					LOG_WARNING("[VT Server]: Client 0x%02X change child location failed because the parent object with ID %u doesn't exist", managedWorkingSet->get_control_function()->get_address(), parentObjectId);
 				}
 			}
 			break;
@@ -1295,7 +1295,7 @@ namespace isobus
 						{
 							managedWorkingSet->set_mask_lock(NULL_OBJECT_ID, 0, 0, {});
 							send_lock_unlock_mask_response(0, get_bit(static_cast<std::uint8_t>(LockUnlockMaskErrorBit::UnsolicitedUnlockMaskIsHidden)), true, managedWorkingSet->get_control_function());
-							LOG_DEBUG("[VT Server]: Client %u mask lock released because the locked mask is no longer visible", managedWorkingSet->get_control_function()->get_address());
+							LOG_DEBUG("[VT Server]: Client 0x%02X mask lock released because the locked mask is no longer visible", managedWorkingSet->get_control_function()->get_address());
 						}
 						send_change_active_mask_response(newActiveMaskObjectId, 0, managedWorkingSet->get_control_function());
 
@@ -1372,18 +1372,18 @@ namespace isobus
 						// The single drain for everything this command queued, the arbitration's activation
 						// events included -- the arbitration enqueues without draining for exactly that.
 						drain_macro_execution_queue();
-						LOG_DEBUG("[VT Server]: Client %u changed active mask to object %u for working set object %u", managedWorkingSet->get_control_function()->get_address(), newActiveMaskObjectId, workingSetObjectId);
+						LOG_DEBUG("[VT Server]: Client 0x%02X changed active mask to object %u for working set object %u", managedWorkingSet->get_control_function()->get_address(), newActiveMaskObjectId, workingSetObjectId);
 					}
 					else
 					{
 						send_change_active_mask_response(newActiveMaskObjectId, get_bit(static_cast<std::uint8_t>(ChangeActiveMaskErrorBit::InvalidMaskObjectID)), managedWorkingSet->get_control_function());
-						LOG_WARNING("[VT Server]: Client %u change active mask failed because the new mask object ID %u was not valid.", managedWorkingSet->get_control_function()->get_address(), newActiveMaskObjectId);
+						LOG_WARNING("[VT Server]: Client 0x%02X change active mask failed because the new mask object ID %u was not valid.", managedWorkingSet->get_control_function()->get_address(), newActiveMaskObjectId);
 					}
 				}
 				else
 				{
 					send_change_active_mask_response(newActiveMaskObjectId, get_bit(static_cast<std::uint8_t>(ChangeActiveMaskErrorBit::InvalidWorkingSetObjectID)), managedWorkingSet->get_control_function());
-					LOG_WARNING("[VT Server]: Client %u change active mask failed because the working set object ID %u was not valid.", managedWorkingSet->get_control_function()->get_address(), workingSetObjectId);
+					LOG_WARNING("[VT Server]: Client 0x%02X change active mask failed because the working set object ID %u was not valid.", managedWorkingSet->get_control_function()->get_address(), workingSetObjectId);
 				}
 			}
 			break;
@@ -1407,7 +1407,7 @@ namespace isobus
 				if (is_object_open_for_input(managedWorkingSet, objectIdToChange) && !is_version6_pair(managedWorkingSet))
 				{
 					send_change_string_value_response(objectIdToChange, get_bit(static_cast<std::uint8_t>(ChangeStringValueErrorBit::ValueInUse)), message.get_source_control_function());
-					LOG_WARNING("[VT Server]: Client %u change string value on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+					LOG_WARNING("[VT Server]: Client 0x%02X change string value on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 					break;
 				}
 
@@ -1440,7 +1440,7 @@ namespace isobus
 								stringVariable->set_value(newStringValue);
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
 								dispatch_repaint(managedWorkingSet);
-								LOG_DEBUG("[VT Server]: Client %u change string value command for string variable object %u. Value: " + newStringValue, managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+								LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for string variable object %u. Value: " + newStringValue, managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 							}
 							break;
 
@@ -1457,7 +1457,7 @@ namespace isobus
 								outputString->set_value(newStringValue);
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
 								dispatch_repaint(managedWorkingSet);
-								LOG_DEBUG("[VT Server]: Client %u change string value command for output string object %u. Value: " + newStringValue, managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+								LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for output string object %u. Value: " + newStringValue, managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 							}
 							break;
 
@@ -1474,14 +1474,14 @@ namespace isobus
 								inputString->set_value(newStringValue);
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
 								dispatch_repaint(managedWorkingSet);
-								LOG_DEBUG("[VT Server]: Client %u change string value command for input string object %u. Value: " + newStringValue, managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+								LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for input string object %u. Value: " + newStringValue, managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 							}
 							break;
 
 							default:
 							{
 								send_change_string_value_response(objectIdToChange, get_bit(static_cast<std::uint8_t>(ChangeStringValueErrorBit::InvalidObjectID)), message.get_source_control_function());
-								LOG_WARNING("[VT Server]: Client %u change string value command for object %u failed because the object ID was for an object that isn't a string.", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+								LOG_WARNING("[VT Server]: Client 0x%02X change string value command for object %u failed because the object ID was for an object that isn't a string.", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 							}
 							break;
 						}
@@ -1489,13 +1489,13 @@ namespace isobus
 					else
 					{
 						send_change_string_value_response(objectIdToChange, get_bit(static_cast<std::uint8_t>(ChangeStringValueErrorBit::InvalidObjectID)), message.get_source_control_function());
-						LOG_WARNING("[VT Server]: Client %u change string value command for object %u failed because the object ID was invalid.", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+						LOG_WARNING("[VT Server]: Client 0x%02X change string value command for object %u failed because the object ID was invalid.", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 					}
 				}
 				else
 				{
 					send_change_string_value_response(objectIdToChange, get_bit(static_cast<std::uint8_t>(ChangeStringValueErrorBit::AnyOtherError)), message.get_source_control_function());
-					LOG_WARNING("[VT Server]: Client %u change string value command for object %u failed because data length is not valid when compared to the amount sent.", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+					LOG_WARNING("[VT Server]: Client 0x%02X change string value command for object %u failed because data length is not valid when compared to the amount sent.", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 				}
 			}
 			break;
@@ -1520,24 +1520,24 @@ namespace isobus
 							fillObject->set_background_color(data[4]);
 							send_change_fill_attributes_response(objectIdToChange, 0, message.get_source_control_function());
 							dispatch_repaint(managedWorkingSet);
-							LOG_DEBUG("[VT Server]: Client %u change fill attributes command for object %u", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+							LOG_DEBUG("[VT Server]: Client 0x%02X change fill attributes command for object %u", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 						}
 						else
 						{
 							send_change_fill_attributes_response(objectIdToChange, get_bit(static_cast<std::uint8_t>(ChangeFillAttributesErrorBit::InvalidType)), message.get_source_control_function());
-							LOG_WARNING("[VT Server]: Client %u change fill attributes of object %u invalid fill object type. Must be a picture graphic.", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+							LOG_WARNING("[VT Server]: Client 0x%02X change fill attributes of object %u invalid fill object type. Must be a picture graphic.", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 						}
 					}
 					else
 					{
 						send_change_fill_attributes_response(objectIdToChange, get_bit(static_cast<std::uint8_t>(ChangeFillAttributesErrorBit::InvalidPatternObjectID)), message.get_source_control_function());
-						LOG_WARNING("[VT Server]: Client %u change fill attributes invalid pattern object ID of %u for object %u", managedWorkingSet->get_control_function()->get_address(), fillPatternID, objectIdToChange);
+						LOG_WARNING("[VT Server]: Client 0x%02X change fill attributes invalid pattern object ID of %u for object %u", managedWorkingSet->get_control_function()->get_address(), fillPatternID, objectIdToChange);
 					}
 				}
 				else
 				{
 					send_change_fill_attributes_response(objectIdToChange, get_bit(static_cast<std::uint8_t>(ChangeFillAttributesErrorBit::InvalidObjectID)), message.get_source_control_function());
-					LOG_WARNING("[VT Server]: Client %u change fill attributes invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+					LOG_WARNING("[VT Server]: Client 0x%02X change fill attributes invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
 				}
 			}
 			break;
@@ -1584,13 +1584,13 @@ namespace isobus
 
 									if (wasFound)
 									{
-										LOG_DEBUG("[VT Server]: Client %u changed child position: object %u of parent object %u, x: %u, y: %u", managedWorkingSet->get_control_function()->get_address(), objectID, parentObjectId, newXPosition, newYPosition);
+										LOG_DEBUG("[VT Server]: Client 0x%02X changed child position: object %u of parent object %u, x: %u, y: %u", managedWorkingSet->get_control_function()->get_address(), objectID, parentObjectId, newXPosition, newYPosition);
 										send_change_child_position_response(parentObjectId, objectID, 0, message.get_source_control_function());
 										process_macro(parentObject, EventID::OnChangeChildPosition, parentObject->get_object_type(), managedWorkingSet);
 									}
 									else
 									{
-										LOG_WARNING("[VT Server]: Client %u change child position error. Target object does not exist or is not applicable: object %u of parent object %u, x: %u, y: %u", managedWorkingSet->get_control_function()->get_address(), objectID, parentObjectId, newXPosition, newYPosition);
+										LOG_WARNING("[VT Server]: Client 0x%02X change child position error. Target object does not exist or is not applicable: object %u of parent object %u, x: %u, y: %u", managedWorkingSet->get_control_function()->get_address(), objectID, parentObjectId, newXPosition, newYPosition);
 										send_change_child_position_response(parentObjectId, objectID, get_bit(static_cast<std::uint8_t>(ChangeChildLocationorPositionErrorBit::TargetObjectDoesNotExistOrIsNotApplicable)), message.get_source_control_function());
 									}
 								}
@@ -1598,7 +1598,7 @@ namespace isobus
 
 								default:
 								{
-									LOG_WARNING("[VT Server]: Client %u change child position error. Parent object type cannot be targeted by this command: object %u of parent object %u, x: %u, y: %u", managedWorkingSet->get_control_function()->get_address(), objectID, parentObjectId, newXPosition, newYPosition);
+									LOG_WARNING("[VT Server]: Client 0x%02X change child position error. Parent object type cannot be targeted by this command: object %u of parent object %u, x: %u, y: %u", managedWorkingSet->get_control_function()->get_address(), objectID, parentObjectId, newXPosition, newYPosition);
 									send_change_child_position_response(parentObjectId, objectID, get_bit(static_cast<std::uint8_t>(ChangeChildLocationorPositionErrorBit::AnyOtherError)), message.get_source_control_function());
 								}
 								break;
@@ -1606,19 +1606,19 @@ namespace isobus
 						}
 						else
 						{
-							LOG_WARNING("[VT Server]: Client %u change child position error. Target object does not exist or is not applicable: object %u of parent object %u, x: %u, y: %u", managedWorkingSet->get_control_function()->get_address(), objectID, parentObjectId, newXPosition, newYPosition);
+							LOG_WARNING("[VT Server]: Client 0x%02X change child position error. Target object does not exist or is not applicable: object %u of parent object %u, x: %u, y: %u", managedWorkingSet->get_control_function()->get_address(), objectID, parentObjectId, newXPosition, newYPosition);
 							send_change_child_position_response(parentObjectId, objectID, get_bit(static_cast<std::uint8_t>(ChangeChildLocationorPositionErrorBit::TargetObjectDoesNotExistOrIsNotApplicable)), message.get_source_control_function());
 						}
 					}
 					else
 					{
-						LOG_WARNING("[VT Server]: Client %u change child position error. Parent object does not exist or is not applicable: object %u of parent object %u, x: %u, y: %u", managedWorkingSet->get_control_function()->get_address(), objectID, parentObjectId, newXPosition, newYPosition);
+						LOG_WARNING("[VT Server]: Client 0x%02X change child position error. Parent object does not exist or is not applicable: object %u of parent object %u, x: %u, y: %u", managedWorkingSet->get_control_function()->get_address(), objectID, parentObjectId, newXPosition, newYPosition);
 						send_change_child_position_response(parentObjectId, objectID, get_bit(static_cast<std::uint8_t>(ChangeChildLocationorPositionErrorBit::ParentObjectDoesntExistOrIsNotAParentOfSpecifiedObject)), message.get_source_control_function());
 					}
 				}
 				else
 				{
-					LOG_WARNING("[VT Server]: Client %u change child position error. DLC must be 9 bytes for the message to be valid.");
+					LOG_WARNING("[VT Server]: Client 0x%02X change child position error. DLC must be 9 bytes for the message to be valid.", message.get_identifier().get_source_address());
 					send_change_child_position_response(parentObjectId, objectID, get_bit(static_cast<std::uint8_t>(ChangeChildLocationorPositionErrorBit::AnyOtherError)), message.get_source_control_function());
 				}
 			}
@@ -1641,7 +1641,7 @@ namespace isobus
 				if (is_object_open_for_input(managedWorkingSet, objectID) && !is_version6_pair(managedWorkingSet))
 				{
 					send_change_attribute_response(objectID, get_bit(static_cast<std::uint8_t>(VTObject::AttributeError::ValueInUse)), data.at(3), message.get_source_control_function());
-					LOG_WARNING("[VT Server]: Client %u change attribute %u on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), attributeID, objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X change attribute %u on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), attributeID, objectID);
 					break;
 				}
 
@@ -1703,7 +1703,7 @@ namespace isobus
 						}
 
 						send_change_attribute_response(objectID, 0, data.at(3), message.get_source_control_function());
-						LOG_DEBUG("[VT Server]: Client %u changed object %u attribute %u to %u", managedWorkingSet->get_control_function()->get_address(), objectID, attributeID, attributeData);
+						LOG_DEBUG("[VT Server]: Client 0x%02X changed object %u attribute %u to %u", managedWorkingSet->get_control_function()->get_address(), objectID, attributeID, attributeData);
 
 						// Table A.3 event 9 for the command itself, queued ahead of the arbitration below so
 						// the event the command is named for precedes the activation events that arbitration
@@ -1764,13 +1764,13 @@ namespace isobus
 					else
 					{
 						send_change_attribute_response(objectID, get_bit(static_cast<std::uint8_t>(errorCode)), data.at(3), message.get_source_control_function());
-						LOG_WARNING("[VT Server]: Client %u change object %u attribute %u to %ul error %u", managedWorkingSet->get_control_function()->get_address(), objectID, attributeID, attributeData, static_cast<std::uint8_t>(errorCode));
+						LOG_WARNING("[VT Server]: Client 0x%02X change object %u attribute %u to %u error %u", managedWorkingSet->get_control_function()->get_address(), objectID, attributeID, attributeData, static_cast<std::uint8_t>(errorCode));
 					}
 				}
 				else
 				{
 					send_change_attribute_response(objectID, get_bit(static_cast<std::uint8_t>(VTObject::AttributeError::InvalidObjectID)), data.at(3), message.get_source_control_function());
-					LOG_WARNING("[VT Server]: Client %u change attribute %u invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), attributeID, objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X change attribute %u invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), attributeID, objectID);
 				}
 			}
 			break;
@@ -1795,12 +1795,12 @@ namespace isobus
 								targetObject->set_width(newWidth);
 								targetObject->set_height(newHeight);
 								success = true;
-								LOG_DEBUG("[VT Server]: Client %u change size command: Object: %u, Width: %u, Height: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight);
+								LOG_DEBUG("[VT Server]: Client 0x%02X change size command: Object: %u, Width: %u, Height: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight);
 								dispatch_repaint(managedWorkingSet);
 							}
 							else
 							{
-								LOG_WARNING("[VT Server]: Client %u change size command: invalid new size. Meter must be square! Object: %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+								LOG_WARNING("[VT Server]: Client 0x%02X change size command: invalid new size. Meter must be square! Object: %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 								send_change_size_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeSizeErrorBit::AnyOtherError)), message.get_source_control_function());
 							}
 						}
@@ -1826,14 +1826,14 @@ namespace isobus
 							targetObject->set_width(newWidth);
 							targetObject->set_height(newHeight);
 							success = true;
-							LOG_DEBUG("[VT Server]: Client %u change size command: Object: %u, Width: %u, Height: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight);
+							LOG_DEBUG("[VT Server]: Client 0x%02X change size command: Object: %u, Width: %u, Height: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newWidth, newHeight);
 							dispatch_repaint(managedWorkingSet);
 						}
 						break;
 
 						default:
 						{
-							LOG_WARNING("[VT Server]: Client %u change size command: invalid object type for object %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+							LOG_WARNING("[VT Server]: Client 0x%02X change size command: invalid object type for object %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 							send_change_size_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeSizeErrorBit::AnyOtherError)), message.get_source_control_function());
 						}
 						break;
@@ -1847,7 +1847,7 @@ namespace isobus
 				}
 				else
 				{
-					LOG_WARNING("[VT Server]: Client %u change size command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X change size command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 					send_change_size_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeSizeErrorBit::InvalidObjectID)), message.get_source_control_function());
 				}
 			}
@@ -1866,7 +1866,7 @@ namespace isobus
 				if (is_object_open_for_input(managedWorkingSet, objectID) && !is_version6_pair(managedWorkingSet))
 				{
 					send_change_list_item_response(objectID, newObjectID, get_bit(static_cast<std::uint8_t>(ChangeListItemErrorBit::ValueInUse)), listIndex, message.get_source_control_function());
-					LOG_WARNING("[VT Server]: Client %u change list item on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X change list item on object %u refused: it is open for operator input", managedWorkingSet->get_control_function()->get_address(), objectID);
 					break;
 				}
 
@@ -1888,13 +1888,13 @@ namespace isobus
 								if (std::static_pointer_cast<InputList>(targetObject)->change_list_item(listIndex, newObjectID, *objectTree))
 								{
 									send_change_list_item_response(objectID, newObjectID, 0, listIndex, message.get_source_control_function());
-									LOG_DEBUG("[VT Server]: Client %u change list item command: Object ID: %u, New Object ID: %u, Index: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newObjectID, listIndex);
+									LOG_DEBUG("[VT Server]: Client 0x%02X change list item command: Object ID: %u, New Object ID: %u, Index: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newObjectID, listIndex);
 									dispatch_repaint(managedWorkingSet);
 								}
 								else
 								{
 									send_change_list_item_response(objectID, newObjectID, get_bit(static_cast<std::uint8_t>(ChangeListItemErrorBit::AnyOtherError)), listIndex, message.get_source_control_function());
-									LOG_WARNING("[VT Server]: Client %u change list item command failed. Object ID: %u, New Object ID: %u, Index: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newObjectID, listIndex);
+									LOG_WARNING("[VT Server]: Client 0x%02X change list item command failed. Object ID: %u, New Object ID: %u, Index: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newObjectID, listIndex);
 								}
 							}
 							break;
@@ -1904,7 +1904,7 @@ namespace isobus
 							{
 								// @todo
 								send_change_list_item_response(objectID, newObjectID, get_bit(static_cast<std::uint8_t>(ChangeListItemErrorBit::AnyOtherError)), listIndex, message.get_source_control_function());
-								LOG_WARNING("[VT Server]: Client %u change list item command: TODO object type", managedWorkingSet->get_control_function()->get_address());
+								LOG_WARNING("[VT Server]: Client 0x%02X change list item command: TODO object type", managedWorkingSet->get_control_function()->get_address());
 							}
 							break;
 
@@ -1913,20 +1913,20 @@ namespace isobus
 								if (std::static_pointer_cast<OutputList>(targetObject)->change_list_item(listIndex, newObjectID, *objectTree))
 								{
 									send_change_list_item_response(objectID, newObjectID, 0, listIndex, message.get_source_control_function());
-									LOG_DEBUG("[VT Server]: Client %u change list item command: Object ID: %u, New Object ID: %u, Index: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newObjectID, listIndex);
+									LOG_DEBUG("[VT Server]: Client 0x%02X change list item command: Object ID: %u, New Object ID: %u, Index: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newObjectID, listIndex);
 									dispatch_repaint(managedWorkingSet);
 								}
 								else
 								{
 									send_change_list_item_response(objectID, newObjectID, get_bit(static_cast<std::uint8_t>(ChangeListItemErrorBit::AnyOtherError)), listIndex, message.get_source_control_function());
-									LOG_WARNING("[VT Server]: Client %u change list item command failed. Object ID: %u, New Object ID: %u, Index: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newObjectID, listIndex);
+									LOG_WARNING("[VT Server]: Client 0x%02X change list item command failed. Object ID: %u, New Object ID: %u, Index: %u", managedWorkingSet->get_control_function()->get_address(), objectID, newObjectID, listIndex);
 								}
 							}
 							break;
 
 							default:
 							{
-								LOG_WARNING("[VT Server]: Client %u change list item command: invalid object type. Object: %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+								LOG_WARNING("[VT Server]: Client 0x%02X change list item command: invalid object type. Object: %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 								send_change_list_item_response(objectID, newObjectID, get_bit(static_cast<std::uint8_t>(ChangeListItemErrorBit::AnyOtherError)), listIndex, message.get_source_control_function());
 							}
 							break;
@@ -1934,13 +1934,13 @@ namespace isobus
 					}
 					else
 					{
-						LOG_WARNING("[VT Server]: Client %u change list item command: invalid new object ID of %u", managedWorkingSet->get_control_function()->get_address(), newObjectID);
+						LOG_WARNING("[VT Server]: Client 0x%02X change list item command: invalid new object ID of %u", managedWorkingSet->get_control_function()->get_address(), newObjectID);
 						send_change_list_item_response(objectID, newObjectID, get_bit(static_cast<std::uint8_t>(ChangeListItemErrorBit::InvalidNewListItemObjectID)), listIndex, message.get_source_control_function());
 					}
 				}
 				else
 				{
-					LOG_WARNING("[VT Server]: Client %u change list item command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X change list item command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 					send_change_list_item_response(objectID, newObjectID, get_bit(static_cast<std::uint8_t>(ChangeListItemErrorBit::InvalidObjectID)), listIndex, message.get_source_control_function());
 				}
 			}
@@ -1965,19 +1965,19 @@ namespace isobus
 						font->set_size(static_cast<FontAttributes::FontSize>(fontSize));
 						font->set_type(static_cast<FontAttributes::FontType>(fontType));
 						font->set_style(fontStyle);
-						LOG_DEBUG("[VT Server]: Client %u change font attributes command: ObjectID: %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+						LOG_DEBUG("[VT Server]: Client 0x%02X change font attributes command: ObjectID: %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 						send_change_font_attributes_response(objectID, 0, message.get_source_control_function());
 						dispatch_repaint(managedWorkingSet);
 					}
 					else
 					{
-						LOG_WARNING("[VT Server]: Client %u change font attributes command: invalid font size %u. ObjectID: %u", managedWorkingSet->get_control_function()->get_address(), fontSize, objectID);
+						LOG_WARNING("[VT Server]: Client 0x%02X change font attributes command: invalid font size %u. ObjectID: %u", managedWorkingSet->get_control_function()->get_address(), fontSize, objectID);
 						send_change_font_attributes_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeFontAttributesErrorBit::InvalidSize)), message.get_source_control_function());
 					}
 				}
 				else
 				{
-					LOG_WARNING("[VT Server]: Client %u change font attributes command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X change font attributes command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 					send_change_font_attributes_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeFontAttributesErrorBit::InvalidObjectID)), message.get_source_control_function());
 				}
 			}
@@ -1998,13 +1998,13 @@ namespace isobus
 					line->set_background_color(lineColour);
 					line->set_width(lineWidth);
 					line->set_line_art_bit_pattern(lineArt);
-					LOG_DEBUG("[VT Server]: Client %u change line attributes command: ObjectID: %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+					LOG_DEBUG("[VT Server]: Client 0x%02X change line attributes command: ObjectID: %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 					send_change_line_attributes_response(objectID, 0, message.get_source_control_function());
 					dispatch_repaint(managedWorkingSet);
 				}
 				else
 				{
-					LOG_WARNING("[VT Server]: Client %u change line attributes command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X change line attributes command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 					send_change_line_attributes_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeFontAttributesErrorBit::InvalidObjectID)), message.get_source_control_function());
 				}
 			}
@@ -2031,7 +2031,7 @@ namespace isobus
 							{
 								if (std::static_pointer_cast<AlarmMask>(targetMask)->change_soft_key_mask(newSoftKeyMaskId, *objectTree))
 								{
-									LOG_DEBUG("[VT Server]: Client %u change soft key mask command: alarm mask object %u to %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId, newSoftKeyMaskId);
+									LOG_DEBUG("[VT Server]: Client 0x%02X change soft key mask command: alarm mask object %u to %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId, newSoftKeyMaskId);
 									send_change_soft_key_mask_response(dataOrAlarmMaskId, newSoftKeyMaskId, 0, message.get_source_control_function());
 
 									if (activeWorkingSet == managedWorkingSet)
@@ -2050,7 +2050,7 @@ namespace isobus
 								}
 								else
 								{
-									LOG_WARNING("[VT Server]: Client %u change soft key mask command: failed to set mask for alarm mask object %u to %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId, newSoftKeyMaskId);
+									LOG_WARNING("[VT Server]: Client 0x%02X change soft key mask command: failed to set mask for alarm mask object %u to %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId, newSoftKeyMaskId);
 									send_change_soft_key_mask_response(dataOrAlarmMaskId, newSoftKeyMaskId, get_bit(static_cast<std::uint8_t>(ChangeSoftKeyMaskErrorBit::AnyOtherError)), message.get_source_control_function());
 								}
 							}
@@ -2060,7 +2060,7 @@ namespace isobus
 							{
 								if (std::static_pointer_cast<DataMask>(targetMask)->change_soft_key_mask(newSoftKeyMaskId, *objectTree))
 								{
-									LOG_DEBUG("[VT Server]: Client %u change soft key mask command: data mask object %u to %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId, newSoftKeyMaskId);
+									LOG_DEBUG("[VT Server]: Client 0x%02X change soft key mask command: data mask object %u to %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId, newSoftKeyMaskId);
 									send_change_soft_key_mask_response(dataOrAlarmMaskId, newSoftKeyMaskId, 0, message.get_source_control_function());
 
 									if (activeWorkingSet == managedWorkingSet)
@@ -2079,7 +2079,7 @@ namespace isobus
 								}
 								else
 								{
-									LOG_WARNING("[VT Server]: Client %u change soft key mask command: failed to set mask for data mask object %u to %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId, newSoftKeyMaskId);
+									LOG_WARNING("[VT Server]: Client 0x%02X change soft key mask command: failed to set mask for data mask object %u to %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId, newSoftKeyMaskId);
 									send_change_soft_key_mask_response(dataOrAlarmMaskId, newSoftKeyMaskId, get_bit(static_cast<std::uint8_t>(ChangeSoftKeyMaskErrorBit::AnyOtherError)), message.get_source_control_function());
 								}
 							}
@@ -2087,7 +2087,7 @@ namespace isobus
 
 							default:
 							{
-								LOG_WARNING("[VT Server]: Client %u change soft key mask command: invalid object type for object %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId);
+								LOG_WARNING("[VT Server]: Client 0x%02X change soft key mask command: invalid object type for object %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId);
 								send_change_soft_key_mask_response(dataOrAlarmMaskId, newSoftKeyMaskId, get_bit(static_cast<std::uint8_t>(ChangeSoftKeyMaskErrorBit::AnyOtherError)), message.get_source_control_function());
 							}
 							break;
@@ -2095,13 +2095,13 @@ namespace isobus
 					}
 					else
 					{
-						LOG_WARNING("[VT Server]: Client %u change soft key mask command: invalid soft key object ID of %u", managedWorkingSet->get_control_function()->get_address(), newSoftKeyMaskId);
+						LOG_WARNING("[VT Server]: Client 0x%02X change soft key mask command: invalid soft key object ID of %u", managedWorkingSet->get_control_function()->get_address(), newSoftKeyMaskId);
 						send_change_soft_key_mask_response(dataOrAlarmMaskId, newSoftKeyMaskId, get_bit(static_cast<std::uint8_t>(ChangeSoftKeyMaskErrorBit::InvalidSoftKeyMaskObjectID)), message.get_source_control_function());
 					}
 				}
 				else
 				{
-					LOG_WARNING("[VT Server]: Client %u change soft key mask command: invalid data mask or alarm mask object ID of %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId);
+					LOG_WARNING("[VT Server]: Client 0x%02X change soft key mask command: invalid data mask or alarm mask object ID of %u", managedWorkingSet->get_control_function()->get_address(), dataOrAlarmMaskId);
 					send_change_soft_key_mask_response(dataOrAlarmMaskId, newSoftKeyMaskId, get_bit(static_cast<std::uint8_t>(ChangeSoftKeyMaskErrorBit::InvalidDataOrAlarmMaskObjectID)), message.get_source_control_function());
 				}
 			}
@@ -2142,7 +2142,7 @@ namespace isobus
 								std::static_pointer_cast<GraphicsContext>(targetObject)->fill_canvas(backgroundColour);
 							}
 
-							LOG_DEBUG("[VT Server]: Client %u change background colour command: colour = %u", managedWorkingSet->get_control_function()->get_address(), objectID, backgroundColour);
+							LOG_DEBUG("[VT Server]: Client 0x%02X change background colour command: object %u colour = %u", managedWorkingSet->get_control_function()->get_address(), objectID, backgroundColour);
 							send_change_background_colour_response(objectID, 0, backgroundColour, message.get_source_control_function());
 							process_macro(targetObject, EventID::OnChangeBackgroundColour, targetObject->get_object_type(), managedWorkingSet);
 							dispatch_repaint(managedWorkingSet);
@@ -2151,7 +2151,7 @@ namespace isobus
 
 						default:
 						{
-							LOG_WARNING("[VT Server]: Client %u change background colour command: invalid object type for object %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+							LOG_WARNING("[VT Server]: Client 0x%02X change background colour command: invalid object type for object %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 							send_change_background_colour_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeBackgroundColourErrorBit::AnyOtherError)), backgroundColour, message.get_source_control_function());
 						}
 						break;
@@ -2159,7 +2159,7 @@ namespace isobus
 				}
 				else
 				{
-					LOG_WARNING("[VT Server]: Client %u change background colour command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X change background colour command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 					send_change_background_colour_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeBackgroundColourErrorBit::InvalidObjectID)), backgroundColour, message.get_source_control_function());
 				}
 			}
@@ -2179,7 +2179,7 @@ namespace isobus
 						{
 							std::static_pointer_cast<AlarmMask>(targetObject)->set_mask_priority(static_cast<AlarmMask::Priority>(newPriority));
 							send_change_priority_response(objectID, 0, newPriority, message.get_source_control_function());
-							LOG_DEBUG("[VT Server]: Client %u change priority command: New Priority %u", managedWorkingSet->get_control_function()->get_address(), newPriority);
+							LOG_DEBUG("[VT Server]: Client 0x%02X change priority command: New Priority %u", managedWorkingSet->get_control_function()->get_address(), newPriority);
 
 							// Table A.3 event 17 for the command itself, ENQUEUED rather than run, because the
 							// arbitration below can raise the activation events of Table B.1 from the same
@@ -2195,19 +2195,19 @@ namespace isobus
 						else
 						{
 							send_change_priority_response(objectID, get_bit(static_cast<std::uint8_t>(ChangePriorityErrorBit::InvalidPriority)), newPriority, message.get_source_control_function());
-							LOG_WARNING("[VT Server]: Client %u change priority command: Invalid Priority %u. Must be 2 or less.", managedWorkingSet->get_control_function()->get_address(), newPriority);
+							LOG_WARNING("[VT Server]: Client 0x%02X change priority command: Invalid Priority %u. Must be 2 or less.", managedWorkingSet->get_control_function()->get_address(), newPriority);
 						}
 					}
 					else
 					{
 						send_change_priority_response(objectID, get_bit(static_cast<std::uint8_t>(ChangePriorityErrorBit::AnyOtherError)), newPriority, message.get_source_control_function());
-						LOG_WARNING("[VT Server]: Client %u change priority command: invalid object ID of %u - the object must be an alarm mask.", managedWorkingSet->get_control_function()->get_address(), objectID);
+						LOG_WARNING("[VT Server]: Client 0x%02X change priority command: invalid object ID of %u - the object must be an alarm mask.", managedWorkingSet->get_control_function()->get_address(), objectID);
 					}
 				}
 				else
 				{
 					send_change_priority_response(objectID, get_bit(static_cast<std::uint8_t>(ChangePriorityErrorBit::InvalidObjectID)), newPriority, message.get_source_control_function());
-					LOG_WARNING("[VT Server]: Client %u change priority command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X change priority command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 				}
 			}
 			break;
@@ -2226,7 +2226,7 @@ namespace isobus
 				if ((nullptr != targetObject) && (NULL_OBJECT_ID != openForInputObjectID) && (openForInputObjectID != objectID))
 				{
 					send_select_input_object_response(objectID, get_bit(static_cast<std::uint8_t>(SelectInputObjectErrorBit::CouldNotCompleteAnotherFieldIsBeingModified)), SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError, message.get_source_control_function());
-					LOG_WARNING("[VT Server]: Client %u select input object %u refused: object %u is currently being entered", managedWorkingSet->get_control_function()->get_address(), objectID, openForInputObjectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X select input object %u refused: object %u is currently being entered", managedWorkingSet->get_control_function()->get_address(), objectID, openForInputObjectID);
 					break;
 				}
 
@@ -2244,7 +2244,7 @@ namespace isobus
 									// 0 in Version 4+ means to activate the object for input
 									managedWorkingSet->set_object_focus(objectID);
 									managedWorkingSet->set_object_open_for_input(objectID);
-									LOG_DEBUG("[VT Server]: Client %u select input object %u and open for input", managedWorkingSet->get_control_function()->get_address(), objectID);
+									LOG_DEBUG("[VT Server]: Client 0x%02X select input object %u and open for input", managedWorkingSet->get_control_function()->get_address(), objectID);
 									onFocusObjectEventDispatcher.call(managedWorkingSet, objectID, true);
 									send_select_input_object_response(objectID, 0, NULL_OBJECT_ID == objectID ? SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError : SelectInputObjectResponse::ObjectIsOpenedForEdit, message.get_source_control_function());
 									process_macro(targetObject, NULL_OBJECT_ID == objectID ? EventID::OnInputFieldDeselection : EventID::OnInputFieldSelection, targetObject->get_object_type(), managedWorkingSet);
@@ -2257,21 +2257,21 @@ namespace isobus
 									// F.7 answers this option with ObjectIsSelected rather than ObjectIsOpenedForEdit,
 									// so a selection ends any edit in progress and leaves no input field open.
 									managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
-									LOG_DEBUG("[VT Server]: Client %u select input object %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+									LOG_DEBUG("[VT Server]: Client 0x%02X select input object %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 									onFocusObjectEventDispatcher.call(managedWorkingSet, objectID, false);
 									send_select_input_object_response(objectID, 0, NULL_OBJECT_ID == objectID ? SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError : SelectInputObjectResponse::ObjectIsSelected, message.get_source_control_function());
 									process_macro(targetObject, NULL_OBJECT_ID == objectID ? EventID::OnInputFieldDeselection : EventID::OnInputFieldSelection, targetObject->get_object_type(), managedWorkingSet);
 								}
 								else
 								{
-									LOG_WARNING("[VT Server]: Client %u select input object command: Illegal option byte", managedWorkingSet->get_control_function()->get_address(), objectID);
+									LOG_WARNING("[VT Server]: Client 0x%02X select input object command: Illegal option byte", managedWorkingSet->get_control_function()->get_address(), objectID);
 									send_select_input_object_response(objectID, get_bit(static_cast<std::uint8_t>(SelectInputObjectErrorBit::InvalidOptionValue)), SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError, message.get_source_control_function());
 								}
 							}
 							else
 							{
 								send_select_input_object_response(objectID, get_bit(static_cast<std::uint8_t>(SelectInputObjectErrorBit::AnyOtherError)), SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError, message.get_source_control_function());
-								LOG_WARNING("[VT Server]: Client %u select input object command: buttons and keys can only be selected when the server is version 4 or higher.", managedWorkingSet->get_control_function()->get_address(), objectID);
+								LOG_WARNING("[VT Server]: Client 0x%02X select input object command: buttons and keys can only be selected when the server is version 4 or higher.", managedWorkingSet->get_control_function()->get_address(), objectID);
 							}
 						}
 						break;
@@ -2285,7 +2285,7 @@ namespace isobus
 								// 0 in Version 4+ means to activate the object for input
 								managedWorkingSet->set_object_focus(objectID);
 								managedWorkingSet->set_object_open_for_input(objectID);
-								LOG_DEBUG("[VT Server]: Client %u select input object %u and open for input", managedWorkingSet->get_control_function()->get_address(), objectID);
+								LOG_DEBUG("[VT Server]: Client 0x%02X select input object %u and open for input", managedWorkingSet->get_control_function()->get_address(), objectID);
 								onFocusObjectEventDispatcher.call(managedWorkingSet, objectID, true);
 								send_select_input_object_response(objectID, 0, NULL_OBJECT_ID == objectID ? SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError : SelectInputObjectResponse::ObjectIsOpenedForEdit, message.get_source_control_function());
 								process_macro(targetObject, NULL_OBJECT_ID == objectID ? EventID::OnInputFieldDeselection : EventID::OnInputFieldSelection, targetObject->get_object_type(), managedWorkingSet);
@@ -2298,14 +2298,14 @@ namespace isobus
 								// F.7 answers this option with ObjectIsSelected rather than ObjectIsOpenedForEdit,
 								// so a selection ends any edit in progress and leaves no input field open.
 								managedWorkingSet->set_object_open_for_input(NULL_OBJECT_ID);
-								LOG_DEBUG("[VT Server]: Client %u select input object %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+								LOG_DEBUG("[VT Server]: Client 0x%02X select input object %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 								onFocusObjectEventDispatcher.call(managedWorkingSet, objectID, false);
 								send_select_input_object_response(objectID, 0, NULL_OBJECT_ID == objectID ? SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError : SelectInputObjectResponse::ObjectIsSelected, message.get_source_control_function());
 								process_macro(targetObject, NULL_OBJECT_ID == objectID ? EventID::OnInputFieldDeselection : EventID::OnInputFieldSelection, targetObject->get_object_type(), managedWorkingSet);
 							}
 							else
 							{
-								LOG_WARNING("[VT Server]: Client %u select input object command: Illegal option byte", managedWorkingSet->get_control_function()->get_address(), objectID);
+								LOG_WARNING("[VT Server]: Client 0x%02X select input object command: Illegal option byte", managedWorkingSet->get_control_function()->get_address(), objectID);
 								send_select_input_object_response(objectID, get_bit(static_cast<std::uint8_t>(SelectInputObjectErrorBit::InvalidOptionValue)), SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError, message.get_source_control_function());
 							}
 						}
@@ -2313,7 +2313,7 @@ namespace isobus
 
 						default:
 						{
-							LOG_WARNING("[VT Server]: Client %u select input object command: invalid object type", managedWorkingSet->get_control_function()->get_address(), objectID);
+							LOG_WARNING("[VT Server]: Client 0x%02X select input object command: invalid object type", managedWorkingSet->get_control_function()->get_address(), objectID);
 							send_select_input_object_response(objectID, get_bit(static_cast<std::uint8_t>(SelectInputObjectErrorBit::AnyOtherError)), SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError, message.get_source_control_function());
 						}
 						break;
@@ -2322,7 +2322,7 @@ namespace isobus
 				else
 				{
 					send_select_input_object_response(objectID, get_bit(static_cast<std::uint8_t>(SelectInputObjectErrorBit::InvalidObjectID)), SelectInputObjectResponse::ObjectIsNotSelectedOrIsNullOrError, message.get_source_control_function());
-					LOG_WARNING("[VT Server]: Client %u select input object command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X select input object command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 				}
 			}
 			break;
@@ -2377,24 +2377,24 @@ namespace isobus
 							// call is the re-entrant no-op.
 							macroExecutionQueue.push_back({ objectID, managedWorkingSet });
 							drain_macro_execution_queue();
-							LOG_DEBUG("[VT Server]: Client %u execute macro command %u: completed.", managedWorkingSet->get_control_function()->get_address(), objectID);
+							LOG_DEBUG("[VT Server]: Client 0x%02X execute macro command %u: completed.", managedWorkingSet->get_control_function()->get_address(), objectID);
 							send_execute_macro_or_extended_macro_response(objectID, 0, message.get_source_control_function(), false);
 						}
 						else
 						{
-							LOG_ERROR("[VT Server]: Client %u execute macro command: failed. Macro contains invalid commands.", managedWorkingSet->get_control_function()->get_address(), objectID);
+							LOG_ERROR("[VT Server]: Client 0x%02X execute macro command: failed. Macro contains invalid commands.", managedWorkingSet->get_control_function()->get_address(), objectID);
 							send_execute_macro_or_extended_macro_response(objectID, get_bit(static_cast<std::uint8_t>(ExecuteMacroResponseErrorBit::AnyOtherError)), message.get_source_control_function(), false);
 						}
 					}
 					else
 					{
-						LOG_WARNING("[VT Server]: Client %u execute macro command: object ID %u is not a macro!", managedWorkingSet->get_control_function()->get_address(), objectID);
+						LOG_WARNING("[VT Server]: Client 0x%02X execute macro command: object ID %u is not a macro!", managedWorkingSet->get_control_function()->get_address(), objectID);
 						send_execute_macro_or_extended_macro_response(objectID, get_bit(static_cast<std::uint8_t>(ExecuteMacroResponseErrorBit::ObjectIsNotAMacro)), message.get_source_control_function(), false);
 					}
 				}
 				else
 				{
-					LOG_WARNING("[VT Server]: Client %u execute macro command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X execute macro command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 					send_execute_macro_or_extended_macro_response(objectID, get_bit(static_cast<std::uint8_t>(ExecuteMacroResponseErrorBit::ObjectDoesntExist)), message.get_source_control_function(), false);
 				}
 			}
@@ -2415,24 +2415,24 @@ namespace isobus
 							// so it is not suppressed at bus level (4.6.11.4 b/c/d/f).
 							macroExecutionQueue.push_back({ objectID, managedWorkingSet });
 							drain_macro_execution_queue();
-							LOG_DEBUG("[VT Server]: Client %u execute extended macro command %u: completed.", managedWorkingSet->get_control_function()->get_address(), objectID);
+							LOG_DEBUG("[VT Server]: Client 0x%02X execute extended macro command %u: completed.", managedWorkingSet->get_control_function()->get_address(), objectID);
 							send_execute_macro_or_extended_macro_response(objectID, 0, message.get_source_control_function(), true);
 						}
 						else
 						{
-							LOG_ERROR("[VT Server]: Client %u execute extended macro command: failed. Macro contains invalid commands.", managedWorkingSet->get_control_function()->get_address(), objectID);
+							LOG_ERROR("[VT Server]: Client 0x%02X execute extended macro command: failed. Macro contains invalid commands.", managedWorkingSet->get_control_function()->get_address(), objectID);
 							send_execute_macro_or_extended_macro_response(objectID, get_bit(static_cast<std::uint8_t>(ExecuteMacroResponseErrorBit::AnyOtherError)), message.get_source_control_function(), true);
 						}
 					}
 					else
 					{
-						LOG_WARNING("[VT Server]: Client %u execute extended macro command: object ID %u is not a macro!", managedWorkingSet->get_control_function()->get_address(), objectID);
+						LOG_WARNING("[VT Server]: Client 0x%02X execute extended macro command: object ID %u is not a macro!", managedWorkingSet->get_control_function()->get_address(), objectID);
 						send_execute_macro_or_extended_macro_response(objectID, get_bit(static_cast<std::uint8_t>(ExecuteMacroResponseErrorBit::ObjectIsNotAMacro)), message.get_source_control_function(), true);
 					}
 				}
 				else
 				{
-					LOG_WARNING("[VT Server]: Client %u execute extended macro command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X execute extended macro command: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 					send_execute_macro_or_extended_macro_response(objectID, get_bit(static_cast<std::uint8_t>(ExecuteMacroResponseErrorBit::ObjectDoesntExist)), message.get_source_control_function(), true);
 				}
 			}
@@ -2440,7 +2440,7 @@ namespace isobus
 
 			case Function::DeleteObjectPoolCommand:
 			{
-				LOG_INFO("[VT Server]: Client %u requests deletion of object pool from volatile memory.", managedWorkingSet->get_control_function()->get_address());
+				LOG_INFO("[VT Server]: Client 0x%02X requests deletion of object pool from volatile memory.", managedWorkingSet->get_control_function()->get_address());
 
 				// The parse worker owns the staging tree while it runs, so a pool cannot be deleted out
 				// from under one. This is checked before the pool is deactivated so that a refusal leaves
@@ -2450,7 +2450,7 @@ namespace isobus
 				// on; it may simply ask again.
 				if (managedWorkingSet->is_object_pool_parse_outstanding())
 				{
-					LOG_WARNING("[VT Server]: Client %u object pool cannot be deleted while its object pool is being parsed.", managedWorkingSet->get_control_function()->get_address());
+					LOG_WARNING("[VT Server]: Client 0x%02X object pool cannot be deleted while its object pool is being parsed.", managedWorkingSet->get_control_function()->get_address());
 					send_delete_object_pool_response(get_bit(static_cast<std::uint8_t>(DeleteObjectPoolErrorBit::DeletionError)), message.get_source_control_function());
 				}
 				else if (delete_object_pool(managedWorkingSet->get_control_function()->get_NAME()) &&
@@ -2460,7 +2460,7 @@ namespace isobus
 					// storage here. ISO 11783-6 F.44 is a deletion, not a deactivation: the parsed objects
 					// and the raw IOP bytes both go, and with them everything the working set derived from
 					// the pool. The working set itself stays connected and may upload a new pool at once.
-					LOG_INFO("[VT Server]: Client %u object pool has been deleted from volatile memory.", managedWorkingSet->get_control_function()->get_address());
+					LOG_INFO("[VT Server]: Client 0x%02X object pool has been deleted from volatile memory.", managedWorkingSet->get_control_function()->get_address());
 					send_delete_object_pool_response(0, message.get_source_control_function());
 
 					// The screen is not left blank because the working set holding it deleted its pool.
@@ -2474,7 +2474,7 @@ namespace isobus
 				}
 				else
 				{
-					LOG_ERROR("[VT Server]: Client %u object pool failed to be deleted.", managedWorkingSet->get_control_function()->get_address());
+					LOG_ERROR("[VT Server]: Client 0x%02X object pool failed to be deleted.", managedWorkingSet->get_control_function()->get_address());
 					send_delete_object_pool_response(get_bit(static_cast<std::uint8_t>(DeleteObjectPoolErrorBit::DeletionError)), message.get_source_control_function());
 				}
 			}
@@ -2496,24 +2496,24 @@ namespace isobus
 
 						if (polygon->change_point(polygonPointIndex, newXValue, newYValue))
 						{
-							LOG_DEBUG("[VT Server]: Client %u change polygon id %u point index %u. X = %u, Y = %u", managedWorkingSet->get_control_function()->get_address(), objectID, polygonPointIndex, newXValue, newYValue);
+							LOG_DEBUG("[VT Server]: Client 0x%02X change polygon id %u point index %u. X = %u, Y = %u", managedWorkingSet->get_control_function()->get_address(), objectID, polygonPointIndex, newXValue, newYValue);
 							send_change_polygon_point_response(objectID, 0, message.get_source_control_function());
 						}
 						else
 						{
-							LOG_WARNING("[VT Server]: Client %u change polygon point: the point index of %u is not valid for object %u", managedWorkingSet->get_control_function()->get_address(), polygonPointIndex, objectID);
+							LOG_WARNING("[VT Server]: Client 0x%02X change polygon point: the point index of %u is not valid for object %u", managedWorkingSet->get_control_function()->get_address(), polygonPointIndex, objectID);
 							send_change_polygon_point_response(objectID, get_bit(static_cast<std::uint8_t>(ChangePolygonPointErrorBit::InvalidPointIndex)), message.get_source_control_function());
 						}
 					}
 					else
 					{
-						LOG_WARNING("[VT Server]: Client %u change polygon point: object id %u is not an output polygon", managedWorkingSet->get_control_function()->get_address(), objectID);
+						LOG_WARNING("[VT Server]: Client 0x%02X change polygon point: object id %u is not an output polygon", managedWorkingSet->get_control_function()->get_address(), objectID);
 						send_change_polygon_point_response(objectID, get_bit(static_cast<std::uint8_t>(ChangePolygonPointErrorBit::AnyOtherError)), message.get_source_control_function());
 					}
 				}
 				else
 				{
-					LOG_WARNING("[VT Server]: Client %u change polygon point: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
+					LOG_WARNING("[VT Server]: Client 0x%02X change polygon point: invalid object ID of %u", managedWorkingSet->get_control_function()->get_address(), objectID);
 					send_change_polygon_point_response(objectID, get_bit(static_cast<std::uint8_t>(ChangePolygonPointErrorBit::InvalidObjectID)), message.get_source_control_function());
 				}
 			}
@@ -2652,7 +2652,7 @@ namespace isobus
 				else if (!responseSent)
 				{
 					// Whomever this is has probably timed out. Send them a NACK
-					LOG_WARNING("[VT Server]: Received a non-status message from a client at address %u, but they are not connected to this VT.", message.get_identifier().get_source_address());
+					LOG_WARNING("[VT Server]: Received a non-status message from a client at address 0x%02X, but they are not connected to this VT.", message.get_identifier().get_source_address());
 					parentServer->send_acknowledgement(AcknowledgementType::Negative, static_cast<std::uint32_t>(CANLibParameterGroupNumber::ECUtoVirtualTerminal), parentServer->get_internal_control_function(), message.get_source_control_function());
 				}
 			}
