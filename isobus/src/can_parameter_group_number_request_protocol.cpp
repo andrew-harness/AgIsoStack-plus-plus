@@ -240,8 +240,14 @@ namespace isobus
 							send_acknowledgement(AcknowledgementType::Negative,
 							                     requestedPGN,
 							                     message.get_source_control_function());
-							LOG_WARNING("[PR]: NACK-ing PGN request for PGN 0x%05X because no callback could handle it.",
-							            requestedPGN);
+							// DEBUG, not WARNING: J1939-21 makes a NACK the correct answer to a
+							// destination-specific request for a PGN this device does not serve, and the
+							// requester is expected to cope. Logging conformant behaviour as a warning
+							// makes it read as a fault in a customer log. The source address is named so
+							// such a log identifies who asked without needing a bus capture.
+							LOG_DEBUG("[PR]: NACK-ing PGN request for PGN 0x%05X from source 0x%02X because no callback could handle it.",
+							          requestedPGN,
+							          (nullptr != message.get_source_control_function()) ? message.get_source_control_function()->get_address() : 0xFE);
 						}
 					}
 					else
