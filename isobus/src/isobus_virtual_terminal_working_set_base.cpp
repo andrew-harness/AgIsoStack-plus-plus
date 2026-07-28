@@ -2492,7 +2492,7 @@ namespace isobus
 						}
 						else
 						{
-							LOG_ERROR("[WS]: Auxiliary input type 1 object %u has an invalid function type. Function type must be 2 or less.");
+							LOG_ERROR("[WS]: Auxiliary input type 1 object %u has an invalid function type. Function type must be 2 or less, but was decoded as %u", decodedID, iopData[4]);
 						}
 					}
 					else
@@ -2654,7 +2654,7 @@ namespace isobus
 						}
 						else
 						{
-							LOG_ERROR("[WS]: Auxiliary control designator type 2 object %u  has an invalid pointer type. Pointer type must be 3 or less.");
+							LOG_ERROR("[WS]: Auxiliary control designator type 2 object %u has an invalid pointer type. Pointer type must be 3 or less, but was decoded as %u", decodedID, iopData[3]);
 						}
 					}
 					else
