@@ -26,7 +26,11 @@ namespace isobus
 	{
 		if (nullptr != associatedControlFunction)
 		{
-			LOG_INFO("[WS]: New VT Server Object Created for CF " + to_string(static_cast<int>(associatedControlFunction->get_NAME().get_full_name())));
+			// A NAME is 64 bits and is reported as the %016llx the rest of the stack reports it as. The
+			// int it used to be cast to could not hold one: every NAME was truncated to its low 32 bits
+			// and then printed as a SIGNED decimal, so this line read "for CF -1344274430" for the NAME
+			// a0001d00afe00001 -- neither the value nor a form anything could be matched against.
+			LOG_INFO("[WS]: New VT Server Object Created for CF %016llx", associatedControlFunction->get_NAME().get_full_name());
 		}
 		else
 		{
