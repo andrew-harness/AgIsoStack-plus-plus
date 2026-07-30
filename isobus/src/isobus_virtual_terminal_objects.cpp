@@ -7148,14 +7148,13 @@ namespace isobus
 
 				case AttributeName::Value:
 				{
-					if (get_number_children() > 0)
-					{
-						returnedAttributeData = get_child_id(0);
-					}
-					else
-					{
-						returnedAttributeData = NULL_OBJECT_ID;
-					}
+					// Table B.55: the Value attribute IS the referenced object ID, and it lives in
+					// `value` -- the parser writes it with set_value() and adds no child, and the
+					// Change Numeric Value handler retargets the pointer the same way. Reading a
+					// child here answers NULL_OBJECT_ID for every parsed Object Pointer, which the
+					// renderer then treats as the legal "point at nothing" and draws none of the
+					// referenced subtree.
+					returnedAttributeData = get_value();
 					retVal = true;
 				}
 				break;
