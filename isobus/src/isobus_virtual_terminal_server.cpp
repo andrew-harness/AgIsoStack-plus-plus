@@ -2497,6 +2497,10 @@ namespace isobus
 						if (polygon->change_point(polygonPointIndex, newXValue, newYValue))
 						{
 							LOG_DEBUG("[VT Server]: Client 0x%02X change polygon id %u point index %u. X = %u, Y = %u", managedWorkingSet->get_control_function()->get_address(), objectID, polygonPointIndex, newXValue, newYValue);
+							// A moved vertex changes what is on screen, so the display layer has to be told,
+							// exactly as every other geometry-mutating command here does. Without this the
+							// pool and the VT Status both move while the presented frame keeps the old shape.
+							dispatch_repaint(managedWorkingSet);
 							send_change_polygon_point_response(objectID, 0, message.get_source_control_function());
 						}
 						else
