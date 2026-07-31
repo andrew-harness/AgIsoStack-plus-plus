@@ -1444,6 +1444,7 @@ namespace isobus
 								// attacker-controlled bus data, and CANStackLogger's variadic overload passes
 								// its format straight to snprintf.
 								LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for string variable object %u. Value: %s", managedWorkingSet->get_control_function()->get_address(), objectIdToChange, newStringValue.c_str());
+								process_macro(stringObject, EventID::OnChangeValue, stringObject->get_object_type(), managedWorkingSet);
 							}
 							break;
 
@@ -1461,6 +1462,7 @@ namespace isobus
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
 								dispatch_repaint(managedWorkingSet);
 								LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for output string object %u. Value: %s", managedWorkingSet->get_control_function()->get_address(), objectIdToChange, newStringValue.c_str());
+								process_macro(stringObject, EventID::OnChangeValue, stringObject->get_object_type(), managedWorkingSet);
 							}
 							break;
 
@@ -1478,6 +1480,7 @@ namespace isobus
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
 								dispatch_repaint(managedWorkingSet);
 								LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for input string object %u. Value: %s", managedWorkingSet->get_control_function()->get_address(), objectIdToChange, newStringValue.c_str());
+								process_macro(stringObject, EventID::OnChangeValue, stringObject->get_object_type(), managedWorkingSet);
 							}
 							break;
 
