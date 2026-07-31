@@ -1484,6 +1484,10 @@ namespace isobus
 							}
 							break;
 
+							case VirtualTerminalObjectType::InputAttributes:
+								handle_change_string_value_on_input_attributes(std::static_pointer_cast<InputAttributes>(stringObject), objectIdToChange, newStringValue, message.get_source_control_function(), managedWorkingSet);
+								break;
+
 							default:
 							{
 								send_change_string_value_response(objectIdToChange, get_bit(static_cast<std::uint8_t>(ChangeStringValueErrorBit::InvalidObjectID)), message.get_source_control_function());

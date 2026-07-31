@@ -833,6 +833,39 @@ namespace isobus
 		}
 	}
 
+	void VirtualTerminalServer::handle_change_string_value_on_input_attributes(std::shared_ptr<InputAttributes> inputAttributes, std::uint16_t objectID, const std::string &newValue, std::shared_ptr<ControlFunction> destination, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet)
+	{
+		// F.24: "the number of bytes in the transfer string ... shall be less than or equal to the length
+		// attribute of the target object (i.e. string length shall not be increased)". A longer transfer is
+		// refused and the validation string is left untouched.
+		//
+		// Table B.52 gives this object no length attribute separate from the string itself, so the cap is
+		// the CURRENT string's length. With no padding back up (below), that length is monotonically
+		// non-increasing: a client that shortens the set to three characters has capped every later
+		// transfer at three, and only a pool re-upload or a Load Version restores a longer one.
+		if (newValue.length() > inputAttributes->get_validation_string().length())
+		{
+			send_change_string_value_response(objectID, get_bit(static_cast<std::uint8_t>(ChangeStringValueErrorBit::StringTooLong)), destination);
+			LOG_WARNING("[VT Server]: Client 0x%02X change string value command for input attributes object %u failed because the transfer is longer than the current validation string.", managedWorkingSet->get_control_function()->get_address(), objectID);
+		}
+		else
+		{
+			// Unlike the Value attribute of a String Variable, Output String or Input String, a shorter
+			// transfer is NOT padded with spaces here. F.24's padding rule is written for a fixed-length
+			// value attribute -- Table B.17's Value row carries an explicit "Pad with spaces as necessary to
+			// satisfy length attribute" note, and Table B.52's Validation string row carries no such note.
+			// Padding a validation string would silently add 0x20 to the set of characters it accepts,
+			// changing what the pool means rather than merely how it displays.
+			inputAttributes->set_validation_string(newValue);
+			send_change_string_value_response(objectID, 0, destination);
+			dispatch_repaint(managedWorkingSet);
+			// The received value is an ARGUMENT, never part of the format string: it is attacker-controlled
+			// bus data, and CANStackLogger's variadic overload passes its format straight to snprintf.
+			LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for input attributes object %u. Value: %s", managedWorkingSet->get_control_function()->get_address(), objectID, newValue.c_str());
+			process_macro(inputAttributes, EventID::OnChangeValue, inputAttributes->get_object_type(), managedWorkingSet);
+		}
+	}
+
 	bool VirtualTerminalServer::send_unsupported_vt_function(std::uint8_t unsupportedFunctionCode, std::shared_ptr<ControlFunction> destination) const
 	{
 		bool retVal = false;

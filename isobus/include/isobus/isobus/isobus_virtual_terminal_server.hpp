@@ -1152,6 +1152,19 @@ namespace isobus
 		/// @param[in] managedWorkingSet The working set that sent the command
 		void handle_change_object_label_command(const std::vector<std::uint8_t> &data, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
 
+		/// @brief Handles a Change String Value command (0xB3, F.24) targeting an Input Attributes object,
+		/// retargeting its validation string -- the set of characters an Input String referencing it will
+		/// accept (ISO 11783-6 Annex B.14.5 lists Change String Value as an allowed command on this object
+		/// type). Per F.24 the transfer must not increase the string's length; unlike the Value attribute of
+		/// a String Variable, Output String or Input String, a short transfer is not space-padded (Table
+		/// B.52's Validation string row carries none of Table B.17's padding note).
+		/// @param[in] inputAttributes The target object, already confirmed to be an Input Attributes object
+		/// @param[in] objectID The target object's ID, for the response and log messages
+		/// @param[in] newValue The transferred bytes, decoded as-is with no padding applied
+		/// @param[in] destination The control function to send the response to
+		/// @param[in] managedWorkingSet The working set that sent the command
+		void handle_change_string_value_on_input_attributes(std::shared_ptr<InputAttributes> inputAttributes, std::uint16_t objectID, const std::string &newValue, std::shared_ptr<ControlFunction> destination, std::shared_ptr<VirtualTerminalServerManagedWorkingSet> managedWorkingSet);
+
 		/// @brief Handles a Select Active Working Set command (0x90, ISO 11783-6:2018 F.64/F.65): the currently
 		/// active working set asks the VT to hand the screen to another working set named by NAME. The command
 		/// is nine data bytes and arrives reassembled from the transport protocol. Available at VT version 6 and
