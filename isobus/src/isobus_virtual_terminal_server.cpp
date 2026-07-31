@@ -1440,7 +1440,10 @@ namespace isobus
 								stringVariable->set_value(newStringValue);
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
 								dispatch_repaint(managedWorkingSet);
-								LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for string variable object %u. Value: " + newStringValue, managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+								// The received value is an ARGUMENT, never part of the format string: it is
+								// attacker-controlled bus data, and CANStackLogger's variadic overload passes
+								// its format straight to snprintf.
+								LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for string variable object %u. Value: %s", managedWorkingSet->get_control_function()->get_address(), objectIdToChange, newStringValue.c_str());
 							}
 							break;
 
@@ -1457,7 +1460,7 @@ namespace isobus
 								outputString->set_value(newStringValue);
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
 								dispatch_repaint(managedWorkingSet);
-								LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for output string object %u. Value: " + newStringValue, managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+								LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for output string object %u. Value: %s", managedWorkingSet->get_control_function()->get_address(), objectIdToChange, newStringValue.c_str());
 							}
 							break;
 
@@ -1474,7 +1477,7 @@ namespace isobus
 								inputString->set_value(newStringValue);
 								send_change_string_value_response(objectIdToChange, 0, message.get_source_control_function());
 								dispatch_repaint(managedWorkingSet);
-								LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for input string object %u. Value: " + newStringValue, managedWorkingSet->get_control_function()->get_address(), objectIdToChange);
+								LOG_DEBUG("[VT Server]: Client 0x%02X change string value command for input string object %u. Value: %s", managedWorkingSet->get_control_function()->get_address(), objectIdToChange, newStringValue.c_str());
 							}
 							break;
 
