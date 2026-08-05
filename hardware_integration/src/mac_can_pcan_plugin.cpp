@@ -11,10 +11,40 @@
 #include "isobus/hardware_integration/mac_can_pcan_plugin.hpp"
 #include "isobus/isobus/can_stack_logger.hpp"
 
+#include <cstring>
 #include <thread>
 
 namespace isobus
 {
+	// A copy of pcan_decode_frame from pcan_basic_windows_plugin.hpp, which carries the full
+	// rationale for what is refused and why. It cannot be shared: this file includes MacCAN's
+	// PCBUSB.h, so TPCANMsg and the PCAN_MESSAGE_* macros are distinct declarations that merely
+	// happen to carry identical values, and the macros expand at the definition site. No machine in
+	// this project can compile this file, so the explanation is deliberately kept in one place
+	// rather than mirrored into the copy least likely to be maintained.
+	static bool mac_can_decode_frame(const TPCANMsg &message, CANMessageFrame &canFrame)
+	{
+		if (0 != (message.MSGTYPE & (PCAN_MESSAGE_ERRFRAME | PCAN_MESSAGE_STATUS | PCAN_MESSAGE_RTR | PCAN_MESSAGE_FD)))
+		{
+			return false;
+		}
+
+		// TPCANMsg::DATA and CANMessageFrame::data are both fixed at 8 bytes; a LEN reported longer
+		// than that is malformed. Checked before the copy below so the copy is bounded by
+		// construction -- silently truncating an over-length LEN would hand the stack a message of
+		// the wrong length, which is worse than refusing it outright.
+		if (message.LEN > 8)
+		{
+			return false;
+		}
+
+		canFrame.identifier = message.ID;
+		canFrame.isExtendedFrame = (0 != (message.MSGTYPE & PCAN_MESSAGE_EXTENDED));
+		canFrame.dataLength = message.LEN;
+		memcpy(canFrame.data, message.DATA, message.LEN);
+		return true;
+	}
+
 	MacCANPCANPlugin::MacCANPCANPlugin(WORD channel) :
 	  handle(channel),
 	  openResult(PCAN_ERROR_OK)
@@ -61,12 +91,15 @@ namespace isobus
 
 		if (PCAN_ERROR_OK == result)
 		{
-			canFrame.dataLength = CANMsg.LEN;
-			memcpy(canFrame.data, CANMsg.DATA, CANMsg.LEN);
-			canFrame.identifier = CANMsg.ID;
-			canFrame.isExtendedFrame = (PCAN_MESSAGE_EXTENDED == CANMsg.MSGTYPE);
-			canFrame.timestamp_us = (CANTimeStamp.millis * 1000) + CANTimeStamp.micros;
-			retVal = true;
+			// A frame the decode refuses (error/status/RTR/FD, or an over-length LEN) is simply not
+			// forwarded. There may be more frames already queued behind it, and sleeping here would
+			// throttle the receive thread to 1000 frames/second on a bus emitting error frames -- the
+			// sleep below is reserved for the empty-queue path.
+			if (mac_can_decode_frame(CANMsg, canFrame))
+			{
+				canFrame.timestamp_us = (CANTimeStamp.millis * 1000) + CANTimeStamp.micros;
+				retVal = true;
+			}
 		}
 		else
 		{

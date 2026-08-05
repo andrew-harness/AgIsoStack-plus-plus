@@ -66,12 +66,15 @@ namespace isobus
 
 		if (PCAN_ERROR_OK == result)
 		{
-			canFrame.dataLength = CANMsg.LEN;
-			memcpy(canFrame.data, CANMsg.DATA, CANMsg.LEN);
-			canFrame.identifier = CANMsg.ID;
-			canFrame.isExtendedFrame = (PCAN_MESSAGE_EXTENDED == CANMsg.MSGTYPE);
-			canFrame.timestamp_us = (CANTimeStamp.millis * 1000) + CANTimeStamp.micros;
-			retVal = true;
+			// A frame the decode refuses (error/status/RTR/FD, or an over-length LEN) is simply not
+			// forwarded. There may be more frames already queued behind it, and sleeping here would
+			// throttle the receive thread to 1000 frames/second on a bus emitting error frames -- the
+			// sleep below is reserved for the empty-queue path.
+			if (pcan_decode_frame(CANMsg, canFrame))
+			{
+				canFrame.timestamp_us = (CANTimeStamp.millis * 1000) + CANTimeStamp.micros;
+				retVal = true;
+			}
 		}
 		else
 		{
