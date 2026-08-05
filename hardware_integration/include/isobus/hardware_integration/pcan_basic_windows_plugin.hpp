@@ -109,5 +109,124 @@ namespace isobus
 		memcpy(canFrame.data, message.DATA, message.LEN);
 		return true;
 	}
+
+	/// @brief True when a `CAN_Initialize` status means the channel is usable.
+	/// @details `PCAN_ERROR_CAUTION` is documented as "an operation was successfully carried out,
+	/// however, irregularities were registered" -- a connected channel, not a failed one. This is
+	/// the single definition of a usable open: `get_is_valid`, the bitrate read and the echo-frame
+	/// setting all defer to it, so the predicate cannot drift between the value `CANHardwareInterface`
+	/// gates its receive thread and every transmit on, and the value this plugin acts on internally.
+	/// @param[in] status The status `CAN_Initialize` returned
+	/// @returns `true` if the channel opened, `false` if it did not
+	inline bool pcan_open_succeeded(TPCANStatus status)
+	{
+		return (PCAN_ERROR_OK == status) || (PCAN_ERROR_CAUTION == status);
+	}
+
+	/// @brief The channel condition to pass to `diagnose_pcan_open` when the `PCAN_CHANNEL_CONDITION`
+	/// read itself failed.
+	/// @details Zero is NOT usable for this, and that is the whole reason this constant exists:
+	/// `PCAN_CHANNEL_UNAVAILABLE` IS zero, so falling back to it would report the most emphatic
+	/// answer in `PcanOpenDiagnosis` -- no such channel exists -- on the strength of a read that
+	/// returned nothing. The value must also carry neither `PCAN_CHANNEL_AVAILABLE` (0x01) nor
+	/// `PCAN_CHANNEL_OCCUPIED` (0x02), or the bit tests in `diagnose_pcan_open` would read it as a
+	/// sharing conflict instead. Those two constraints together are what makes it 0xFFFFFFFC rather
+	/// than an all-ones sentinel, and `pcan_open_diagnosis_tests` pins both.
+	constexpr DWORD PCAN_CONDITION_UNREAD = 0xFFFFFFFCU;
+
+	/// @brief Enumerates the outcomes of opening a PCAN channel, distinguishing a plain success
+	/// from the ones an operator needs to act on: a channel already held by another application,
+	/// or one that negotiated a bitrate other than ISO 11783-2's 250 kbit/s.
+	enum class PcanOpenDiagnosis
+	{
+		Ok, ///< opened, exclusive or shared, at the requested bitrate
+		OkSharedChannel, ///< opened while another application holds the channel
+		OkWrongBitrate, ///< opened, but the negotiated bitrate is not 250 kbit/s
+		FailedChannelAbsent, ///< no such channel on this machine
+		FailedChannelOccupied, ///< another application holds it and we could not join
+		FailedOther ///< opening failed for a reason other than the channel being absent or occupied
+	};
+
+	/// @brief Classifies the result of a `CAN_Initialize` call, together with the channel condition
+	/// and negotiated bitrate read immediately afterward, into an operator-actionable diagnosis.
+	/// @details Branches on `condition` (`PCAN_CHANNEL_CONDITION`) rather than on `status` to decide
+	/// whether a failed open was a sharing conflict, because the condition is a value this plugin
+	/// can read and confirm, not one it must infer from a status code.
+	/// @attention This function is `inline` and defined here, not in the .cpp, for the same reason
+	/// as `pcan_decode_frame`: a unit test exercises it with synthetic status/condition/bitrate
+	/// values and no link dependency on the PCAN import library.
+	/// @param[in] status The status `CAN_Initialize` returned
+	/// @param[in] condition The channel's `PCAN_CHANNEL_CONDITION` value, read after the initialize
+	/// call regardless of whether it succeeded
+	/// @param[in] busSpeed The channel's negotiated `PCAN_BUSSPEED_NOMINAL` value, in bits per
+	/// second, read only when `status` reported success. Zero means the diagnostic read itself
+	/// failed -- a `CAN_GetValue` error leaves its output buffer unwritten -- and must not be read
+	/// as a bitrate mismatch: reporting a wrong bitrate on the strength of a failed read would be
+	/// worse than reporting nothing.
+	/// @returns The `PcanOpenDiagnosis` classifying this open
+	inline PcanOpenDiagnosis diagnose_pcan_open(TPCANStatus status, DWORD condition, DWORD busSpeed)
+	{
+		if (pcan_open_succeeded(status))
+		{
+			// A wrong bitrate outranks a shared-channel report: it is the more serious fact, and a
+			// channel can be simultaneously shared and mismatched, in which case the operator needs
+			// to hear about the bitrate first.
+			if ((0U != busSpeed) && (250000U != busSpeed))
+			{
+				return PcanOpenDiagnosis::OkWrongBitrate;
+			}
+			// PCAN_CHANNEL_CONDITION is a bitfield, not an enumeration -- PCAN_CHANNEL_PCANVIEW is
+			// literally defined as (PCAN_CHANNEL_AVAILABLE | PCAN_CHANNEL_OCCUPIED). Testing it with
+			// == is the same defect shape carry 0096 fixed for TPCANMsg::MSGTYPE: a future PEAK bit
+			// added to either value would silently stop matching an equality test. Testing the
+			// PCAN_CHANNEL_OCCUPIED bit covers PCAN_CHANNEL_OCCUPIED and PCAN_CHANNEL_PCANVIEW alike,
+			// since both carry it.
+			if (0U != (condition & PCAN_CHANNEL_OCCUPIED))
+			{
+				return PcanOpenDiagnosis::OkSharedChannel;
+			}
+			return PcanOpenDiagnosis::Ok;
+		}
+
+		// PCAN_CHANNEL_UNAVAILABLE is 0, the only condition value with no bits set, so unlike
+		// PCAN_CHANNEL_OCCUPIED this one cannot be expressed as a mask test and stays an equality
+		// comparison.
+		if (PCAN_CHANNEL_UNAVAILABLE == condition)
+		{
+			return PcanOpenDiagnosis::FailedChannelAbsent;
+		}
+		if (0U != (condition & PCAN_CHANNEL_OCCUPIED))
+		{
+			return PcanOpenDiagnosis::FailedChannelOccupied;
+		}
+		// Includes PCAN_CHANNEL_AVAILABLE: the channel exists and is free, so a failure to open it
+		// is something else entirely, not a sharing conflict and not an absent channel.
+		return PcanOpenDiagnosis::FailedOther;
+	}
+
+	/// @brief Returns the operator-facing sentence for a `PcanOpenDiagnosis`.
+	/// @details The occupied case names the fix, not the symptom, since that is the case this
+	/// project has actually had to debug on a bench: a channel already held by PCAN-View.
+	/// @param[in] diagnosis The diagnosis to describe
+	/// @returns A non-null, non-empty, statically allocated string
+	inline const char *pcan_open_diagnosis_text(PcanOpenDiagnosis diagnosis)
+	{
+		switch (diagnosis)
+		{
+			case PcanOpenDiagnosis::Ok:
+				return "connected";
+			case PcanOpenDiagnosis::OkSharedChannel:
+				return "connected, sharing the channel with another application";
+			case PcanOpenDiagnosis::OkWrongBitrate:
+				return "connected, but the channel's negotiated bitrate is not 250 kbit/s";
+			case PcanOpenDiagnosis::FailedChannelAbsent:
+				return "no PCAN channel found at this handle; check the device is connected and its driver is installed";
+			case PcanOpenDiagnosis::FailedChannelOccupied:
+				return "channel is held by another application; close it, or if it is PCAN-View set its Connect dialog to 250 kbit/s";
+			case PcanOpenDiagnosis::FailedOther:
+				return "failed to open the channel for a reason other than sharing or absence";
+		}
+		return "unrecognized PCAN open diagnosis";
+	}
 }
 #endif // PCAN_BASIC_WINDOWS_PLUGIN_HPP
