@@ -89,16 +89,29 @@ namespace isobus
 
 	bool CANHardwareInterface::CANHardware::receive_can_frame()
 	{
-		if ((nullptr != frameHandler) && frameHandler->get_is_valid() && (!receivedMessagesQueue.is_full()))
+		// Wrapper for the no-threads/Arduino path in update(), which ignores the outcome, so that call
+		// site does not need ReceiveOutcome.
+		return (ReceiveOutcome::FrameRead == try_receive_can_frame());
+	}
+
+	CANHardwareInterface::ReceiveOutcome CANHardwareInterface::CANHardware::try_receive_can_frame()
+	{
+		if ((nullptr == frameHandler) || !frameHandler->get_is_valid())
 		{
-			CANMessageFrame frame;
-			if (frameHandler->read_frame(frame))
-			{
-				receivedMessagesQueue.push(frame);
-				return true; // Indicate that a frame was read
-			}
+			return ReceiveOutcome::HandlerUnavailable;
 		}
-		return false;
+		if (receivedMessagesQueue.is_full())
+		{
+			return ReceiveOutcome::QueueFull;
+		}
+
+		CANMessageFrame frame;
+		if (frameHandler->read_frame(frame))
+		{
+			receivedMessagesQueue.push(frame);
+			return ReceiveOutcome::FrameRead;
+		}
+		return ReceiveOutcome::NoFrameAvailable;
 	}
 
 #if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
@@ -131,23 +144,45 @@ namespace isobus
 
 	void CANHardwareInterface::CANHardware::receive_thread_function()
 	{
+		// try_receive_can_frame classifies every case this loop must back off differently for, so it is
+		// the single place the handler is inspected. Testing the handler here as well would leave two
+		// places that must agree, and the redundant one would read as removable -- at which point the
+		// handler-invalid case would fall to the yield below and spin a core on a driver that has gone
+		// away, which is the defect this classification exists to prevent.
 		while (receiveThreadRunning)
 		{
-			if ((nullptr != frameHandler) && frameHandler->get_is_valid())
+			switch (try_receive_can_frame())
 			{
-				if (!receive_can_frame())
-				{
-					// There was no frame to receive, so if any other thread wants to do something, let it.
-					std::this_thread::yield();
-				}
-				else
+				case ReceiveOutcome::FrameRead:
 				{
 					CANHardwareInterface::updateThreadWakeupCondition.notify_all();
 				}
-			}
-			else
-			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // Arbitrary, but don't want to infinite loop on the validity check.
+				break;
+
+				case ReceiveOutcome::NoFrameAvailable:
+				{
+					// The plugin was read and had nothing to give, and its own read_frame is where that
+					// wait lives (blocking, or a short sleep on its own empty-queue error). Sleeping
+					// again here on top of that would halve throughput on a busy bus, so this only
+					// yields to let another ready thread run.
+					std::this_thread::yield();
+				}
+				break;
+
+				case ReceiveOutcome::QueueFull:
+				{
+					// The plugin's read is skipped while the queue is full, so nothing in this iteration
+					// waited. Without a real sleep here this case spins the core flat out until
+					// CANHardwareInterface::update() drains the queue.
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				}
+				break;
+
+				case ReceiveOutcome::HandlerUnavailable:
+				{
+					std::this_thread::sleep_for(std::chrono::milliseconds(1000)); // Arbitrary, but don't want to infinite loop on the validity check.
+				}
+				break;
 			}
 		}
 	}

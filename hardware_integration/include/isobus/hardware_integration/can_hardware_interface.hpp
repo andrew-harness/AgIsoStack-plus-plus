@@ -114,6 +114,21 @@ namespace isobus
 		static std::uint32_t get_periodic_update_interval();
 
 	private:
+		/// @brief The outcome of a single attempt to receive a frame from the hardware.
+		/// @details Every enumerator maps to exactly one backoff in @ref
+		/// CANHardware::receive_thread_function, and that mapping is the reason this is an enumeration
+		/// rather than a bool: only @ref NoFrameAvailable describes a state where something else has
+		/// already waited (the plugin's own `read_frame` blocks or sleeps when the hardware is dry).
+		/// The other two are reached without entering the plugin's read at all, so if the thread does
+		/// not wait for them, nothing does.
+		enum class ReceiveOutcome
+		{
+			FrameRead, ///< A frame was read from the hardware and queued
+			NoFrameAvailable, ///< The plugin was read and had nothing to give; it did its own waiting
+			QueueFull, ///< The receive queue is full, so the plugin's read was skipped
+			HandlerUnavailable ///< There is no frame handler, or it reports itself invalid
+		};
+
 		/// @brief Stores the data for a single CAN channel
 		class CANHardware
 		{
@@ -141,6 +156,11 @@ namespace isobus
 			/// @brief Receives a frame from the hardware and adds it to the receive queue
 			/// @returns `true` if a frame was received, otherwise `false`
 			bool receive_can_frame();
+
+			/// @brief Receives a frame from the hardware and adds it to the receive queue
+			/// @returns The outcome of the attempt: whether a frame was read, the hardware had none to
+			/// give, or the receive queue was already full so the hardware was not read at all
+			ReceiveOutcome try_receive_can_frame();
 
 #if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
 			/// @brief Starts the receiving thread for this CAN channel
