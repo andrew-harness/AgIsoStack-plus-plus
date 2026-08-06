@@ -189,6 +189,24 @@ namespace isobus
 		/// @returns A list of all the active transport protocol sessions
 		std::list<std::shared_ptr<TransportProtocolSessionBase>> get_active_transport_protocol_sessions(std::uint8_t canPortIndex) const;
 
+		/// @brief Drops every active transport protocol session, both TP and ETP, in which the
+		/// supplied control function participates as either the source or the destination.
+		/// @details No Connection Abort is transmitted; see
+		/// @ref TransportProtocolManager::abort_all_sessions for why an orderly local teardown is
+		/// silent on the wire. A session holds the caller-supplied callback context by raw pointer and
+		/// lives in the transport manager rather than in the object that started it, so an object with
+		/// a transfer in flight is still reachable through that pointer after it has torn itself down.
+		/// @attention This narrows that exposure; it does not remove it, and it is not a substitute
+		/// for stopping the CAN update thread. What it does guarantee is that no session survives the
+		/// call and that none can appear afterwards -- a receive session is always created with a null
+		/// callback and a null parent, and only the owner of a transmit session starts one, so with
+		/// that owner quiesced there is nothing left to create one. What it cannot do is interrupt an
+		/// update already running on the CAN thread, which holds its own copy of the session and can
+		/// still reach the completion and chunk callbacks. Join the CAN update thread
+		/// (CANHardwareInterface::stop()) before dropping the last reference to the callback context.
+		/// @param[in] controlFunction The control function whose sessions are to be dropped
+		void abort_all_transport_sessions(std::shared_ptr<ControlFunction> controlFunction);
+
 		/// @brief Returns the class instance of the NMEA2k fast packet protocol.
 		/// Use this to register for FP multipacket messages
 		/// @param[in] canPortIndex The CAN channel index to get the fast packet protocol for

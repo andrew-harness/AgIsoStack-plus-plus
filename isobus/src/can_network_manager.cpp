@@ -445,6 +445,25 @@ namespace isobus
 		return retVal;
 	}
 
+	void CANNetworkManager::abort_all_transport_sessions(std::shared_ptr<ControlFunction> controlFunction)
+	{
+		if (nullptr == controlFunction)
+		{
+			return;
+		}
+
+		// One port's pair of managers is swept rather than all of them: a control function's channel
+		// index is fixed for its lifetime (ControlFunction::canPortIndex is const) and there is one
+		// manager per channel, so a session involving this control function can only live here.
+		const std::uint8_t canPortIndex = controlFunction->get_can_port();
+
+		if (CAN_PORT_MAXIMUM > static_cast<std::uint32_t>(canPortIndex))
+		{
+			transportProtocols[canPortIndex]->abort_all_sessions(controlFunction);
+			extendedTransportProtocols[canPortIndex]->abort_all_sessions(controlFunction);
+		}
+	}
+
 	std::unique_ptr<FastPacketProtocol> &CANNetworkManager::get_fast_packet_protocol(std::uint8_t canPortIndex)
 	{
 		return fastPacketProtocol[canPortIndex];

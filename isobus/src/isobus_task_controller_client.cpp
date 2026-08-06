@@ -275,6 +275,26 @@ namespace isobus
 				workerThread = nullptr;
 			}
 #endif
+			// A DDOP transfer hands the transport a raw `this` as its chunk and completion callback
+			// context, and the session lives in the transport manager rather than in this object, so
+			// it outlives the worker thread joined above. Any session still in flight is dropped here
+			// so that no LATER transport tick can call back into a client that is being torn down, and
+			// so that no new session can be started behind this teardown: a receive session always
+			// carries a null callback and a null parent, and only this client starts transmit
+			// sessions, so with the worker stopped there is no source of a new one.
+			//
+			// This must follow the join. Closing a transmit session invokes process_tx_callback with
+			// success = false, which drives the state to Disconnected and calls clear_queues() -- and
+			// clear_queues() empties seven containers that every other access guards with
+			// clientMutex, so running it from this thread while the worker is still alive would be a
+			// data race on those containers.
+			//
+			// This narrows the use-after-free window; it does not close it. The CAN update thread is
+			// not synchronized with here at all, so a tick already in progress still holds its own
+			// copy of the session and can reach the callback with this object's address. Joining the
+			// CAN thread (CANHardwareInterface::stop()) before dropping the last reference to this
+			// client remains the rule.
+			CANNetworkManager::CANNetwork.abort_all_transport_sessions(myControlFunction);
 		}
 	}
 

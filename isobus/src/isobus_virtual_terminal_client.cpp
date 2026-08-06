@@ -106,6 +106,28 @@ namespace isobus
 				workerThread = nullptr;
 			}
 #endif
+			// An object pool transfer hands the transport a raw `this` as its chunk and completion
+			// callback context, and the session lives in the transport manager rather than in this
+			// object, so it outlives the worker thread joined above. Any session still in flight is
+			// dropped here so that no LATER transport tick can call back into a client that is being
+			// torn down, and so that no new session can be started behind this teardown: a receive
+			// session always carries a null callback and a null parent, and only this client starts
+			// transmit sessions, so with the worker stopped there is no source of a new one.
+			//
+			// The ordering around this call is load-bearing in both directions. It must follow the
+			// Delete Object Pool send above, which is the protocol-correct goodbye and needs a live
+			// send path -- dropping the sessions first would strand it. It must also follow the join:
+			// closing a transmit session invokes its completion callback with success = false, which
+			// sets currentObjectPoolState to Failed, and a worker thread still running would see that
+			// and report an upload failure for what is an orderly shutdown.
+			//
+			// This narrows the window; it does not close it. The CAN update thread is not
+			// synchronized with here at all, so a tick already in progress still holds its own copy of
+			// the session and can reach the callback with this object's address. Joining the CAN
+			// thread (CANHardwareInterface::stop()) before dropping the last reference to this client
+			// remains the rule.
+			CANNetworkManager::CANNetwork.abort_all_transport_sessions(myControlFunction);
+
 			initialized = false;
 			set_state(StateMachineState::Disconnected);
 			LOG_INFO("[VT]: VT Client connection has been terminated.");

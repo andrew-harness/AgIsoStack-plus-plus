@@ -214,6 +214,27 @@ namespace isobus
 		                               TransmitCompleteCallback sessionCompleteCallback,
 		                               void *parentPointer);
 
+		/// @brief Drops every active session, transmit or receive, in which the supplied control
+		/// function participates as either the source or the destination.
+		/// @details No Connection Abort is transmitted for the sessions that are dropped. This is
+		/// meant for an orderly local shutdown, where our own participant is going away: ISO 11783-3's
+		/// Connection Abort exists to tell a partner to stop an active transfer, so sending one during
+		/// our own teardown would make that partner log a protocol error for what is a clean local
+		/// exit. Use @ref abort_session instead when the partner does need to be told.
+		/// @attention This does NOT make it safe to destroy an object the transport holds as a
+		/// callback context while the CAN update thread is running. It removes every session from the
+		/// list, so no LATER update can reach one, and no new session can appear behind it -- a
+		/// receive session is always created with a null callback and a null parent, and only the
+		/// owner of a transmit session starts one. But this call takes no part in the update thread's
+		/// synchronization: an update already in progress holds its own copy of the session and can
+		/// still reach the completion and chunk callbacks with the caller's pointer. Joining the CAN
+		/// update thread before dropping the last reference to that object remains necessary.
+		/// @note A session with no destination is a broadcast (BAM) session, so a null control
+		/// function is refused outright rather than being allowed to match, and sweep, every
+		/// broadcast in progress.
+		/// @param[in] controlFunction The control function whose sessions are to be dropped
+		void abort_all_sessions(std::shared_ptr<ControlFunction> controlFunction);
+
 	private:
 		/// @brief Aborts the session with the specified abort reason. Sends a CAN message.
 		/// @param[in] session The session to abort

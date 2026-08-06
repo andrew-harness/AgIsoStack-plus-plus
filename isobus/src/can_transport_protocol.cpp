@@ -1055,4 +1055,44 @@ namespace isobus
 		LOCK_GUARD(Mutex, activeSessionsMutex);
 		return activeSessions;
 	}
+
+	void TransportProtocolManager::abort_all_sessions(std::shared_ptr<ControlFunction> controlFunction)
+	{
+		if (nullptr == controlFunction)
+		{
+			// A broadcast session has no destination, so a null argument would match every BAM in
+			// progress. Refusing it keeps "drop this participant's sessions" from meaning
+			// "drop everyone's broadcasts".
+			return;
+		}
+
+		// get_sessions() returns a copy taken under the session lock. Iterating that copy is the same
+		// mechanism update() uses to close sessions mid-iteration, and it is what makes calling
+		// close_session() here safe while the update thread mutates the live list.
+		for (const auto &session : get_sessions())
+		{
+			if ((controlFunction == session->get_source()) ||
+			    (controlFunction == session->get_destination()))
+			{
+				// update() runs its loop over a copy of the session list, so a tick already in
+				// progress on the CAN thread still holds this session and would keep driving its
+				// state machine -- and for a transmit session that means calling back into the
+				// parent this teardown exists to protect. Neutering the state narrows that: it is
+				// what update()'s state guard and update_state_machine()'s `case None` both test.
+				//
+				// It is NOT a barrier. update()'s first two branches close the session on an invalid
+				// source or destination address without ever reading the state, and process_message()
+				// can reach it through get_session() on the same thread, so both routes still get to
+				// close_session() and its completion callback. Only close_session() below, by erasing
+				// the session, keeps LATER ticks away from it.
+				//
+				// This write is also unsynchronized against the CAN thread's read of the same member,
+				// which by the letter of the standard is a data race. It is accepted rather than
+				// repaired: making the state atomic would change an existing member's type, and this
+				// whole API is deliberately a purely additive fork diff.
+				session->set_state(StateMachineState::None);
+				close_session(session, false);
+			}
+		}
+	}
 }
