@@ -154,7 +154,7 @@ namespace isobus
 			// sleep below is reserved for the empty-queue path.
 			if (pcan_decode_frame(CANMsg, canFrame))
 			{
-				canFrame.timestamp_us = (CANTimeStamp.millis * 1000) + CANTimeStamp.micros;
+				canFrame.timestamp_us = pcan_timestamp_us(CANTimeStamp);
 				retVal = true;
 			}
 		}

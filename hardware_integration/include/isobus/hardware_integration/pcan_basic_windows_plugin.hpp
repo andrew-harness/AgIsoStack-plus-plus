@@ -11,6 +11,7 @@
 #ifndef PCAN_BASIC_WINDOWS_PLUGIN_HPP
 #define PCAN_BASIC_WINDOWS_PLUGIN_HPP
 
+#include <cstdint>
 #include <cstring>
 #include <string>
 
@@ -108,6 +109,24 @@ namespace isobus
 		canFrame.dataLength = message.LEN;
 		memcpy(canFrame.data, message.DATA, message.LEN);
 		return true;
+	}
+
+	/// @brief Converts a PCAN receive timestamp to whole microseconds.
+	/// @details This is PEAK's own formula, stated above `tagTPCANTimestamp` in PCANBasic.h:
+	/// `micros + 1000 * millis + 0x100000000 * 1000 * millis_overflow`. Both halves of it matter.
+	/// `millis` is a 32-bit `DWORD`, so multiplying it by 1000 in its own width wraps once the
+	/// driver has been up for 4,294,968 ms -- about 72 minutes -- and `millis_overflow` counts the
+	/// roll-arounds of `millis` itself, which is a further 49 days per count and cannot be
+	/// reconstructed from the other two fields. Every term is widened to 64 bits before it is
+	/// multiplied, which is the whole point: the destination is already `std::uint64_t`, so a
+	/// narrow intermediate is the only way to lose the value.
+	/// @param[in] timestamp The timestamp `CAN_Read` reported alongside the frame
+	/// @returns The timestamp in microseconds
+	inline std::uint64_t pcan_timestamp_us(const TPCANTimestamp &timestamp)
+	{
+		return static_cast<std::uint64_t>(timestamp.micros) +
+		  (static_cast<std::uint64_t>(timestamp.millis) * 1000ULL) +
+		  (static_cast<std::uint64_t>(timestamp.millis_overflow) * 0x100000000ULL * 1000ULL);
 	}
 
 	/// @brief True when a `CAN_Initialize` status means the channel is usable.

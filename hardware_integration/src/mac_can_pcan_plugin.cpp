@@ -11,17 +11,29 @@
 #include "isobus/hardware_integration/mac_can_pcan_plugin.hpp"
 #include "isobus/isobus/can_stack_logger.hpp"
 
+#include <cstdint>
 #include <cstring>
 #include <thread>
 
 namespace isobus
 {
-	// A copy of pcan_decode_frame from pcan_basic_windows_plugin.hpp, which carries the full
-	// rationale for what is refused and why. It cannot be shared: this file includes MacCAN's
-	// PCBUSB.h, so TPCANMsg and the PCAN_MESSAGE_* macros are distinct declarations that merely
-	// happen to carry identical values, and the macros expand at the definition site. No machine in
-	// this project can compile this file, so the explanation is deliberately kept in one place
-	// rather than mirrored into the copy least likely to be maintained.
+	// Copies of pcan_timestamp_us and pcan_decode_frame from pcan_basic_windows_plugin.hpp, which
+	// carries the full rationale for both. They cannot be shared: this file includes MacCAN's
+	// PCBUSB.h, so TPCANMsg, TPCANTimestamp and the PCAN_MESSAGE_* macros are distinct declarations
+	// that merely happen to carry identical values, and the macros expand at the definition site. No
+	// machine in this project can compile this file, so the explanation is deliberately kept in one
+	// place rather than mirrored into the copy least likely to be maintained.
+	//
+	// One platform note that is not in the Windows copy: PCBUSB.h records that `millis` was narrowed
+	// from 64-bit to 32-bit, so here `millis_overflow` is the only way to recover the range that
+	// narrowing gave up, and dropping it is not a rounding error.
+	static std::uint64_t mac_can_timestamp_us(const TPCANTimestamp &timestamp)
+	{
+		return static_cast<std::uint64_t>(timestamp.micros) +
+		  (static_cast<std::uint64_t>(timestamp.millis) * 1000ULL) +
+		  (static_cast<std::uint64_t>(timestamp.millis_overflow) * 0x100000000ULL * 1000ULL);
+	}
+
 	static bool mac_can_decode_frame(const TPCANMsg &message, CANMessageFrame &canFrame)
 	{
 		if (0 != (message.MSGTYPE & (PCAN_MESSAGE_ERRFRAME | PCAN_MESSAGE_STATUS | PCAN_MESSAGE_RTR | PCAN_MESSAGE_FD)))
@@ -97,7 +109,7 @@ namespace isobus
 			// sleep below is reserved for the empty-queue path.
 			if (mac_can_decode_frame(CANMsg, canFrame))
 			{
-				canFrame.timestamp_us = (CANTimeStamp.millis * 1000) + CANTimeStamp.micros;
+				canFrame.timestamp_us = mac_can_timestamp_us(CANTimeStamp);
 				retVal = true;
 			}
 		}
