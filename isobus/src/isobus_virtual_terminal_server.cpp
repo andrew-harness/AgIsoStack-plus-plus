@@ -509,6 +509,19 @@ namespace isobus
 			}
 			break;
 
+			case Function::IdentifyVTMessage:
+			{
+				// ISO 11783-6 F.62 (2014) / D.18 (2018): Identify VT "may be sent by either Working Sets
+				// or VTs" and "is intended to be sent Destination-Global", so the senders it is written
+				// for -- another VT, or a service tool -- are never a connected working set of this VT.
+				// It is therefore dispatched statelessly, from any source. retVal marks the function
+				// supported so the caller sends neither a NACK nor an Unsupported VT Function reply; the
+				// message itself has no response.
+				identify_vt();
+				retVal = true;
+			}
+			break;
+
 			case Function::AuxiliaryCapabilitiesRequest:
 				retVal = handle_auxiliary_capabilities_request(message, data);
 				break;
@@ -2564,12 +2577,6 @@ namespace isobus
 			case Function::GraphicsContextCommand:
 				handle_graphics_context_command(data, managedWorkingSet);
 				break;
-
-			case Function::IdentifyVTMessage:
-			{
-				identify_vt();
-			}
-			break;
 
 			case Function::ScreenCapture:
 			{
